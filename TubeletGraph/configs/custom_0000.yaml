@@ -49,7 +49,7 @@ datasets:
     split_dir: ./splits/custom
     image_format: '*.jpg'
     anno_format: '*.png'
-    fps: 30
+    fps: 3
 entity_seg:
   cropformer:
     project_path: ./thirdparty/detectron2/projects/CropFormer

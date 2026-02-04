@@ -12,9 +12,6 @@ Key changes from original:
 - Enhanced prompts for gripper/robot manipulation scenarios
 - Better handling of subtle transformations like toothpaste leaking
 
-Usage:
-    Replace the original prompt_vlm.py with this file, or import the enhanced
-    functions into your existing pipeline.
 """
 
 import json, cv2, os, sys, glob

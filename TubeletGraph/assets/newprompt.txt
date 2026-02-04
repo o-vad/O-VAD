@@ -7,6 +7,447 @@ nohup: ignoring input
   @autocast(enabled=False)
 Using PyTorch large kernel dw conv impl
 [GConvNet]: convert str gconv to func
-0000:   0%|          | 0/180 [00:00<?, ?it/s]/home/yizhou/miniconda3/envs/tubeletgraph/lib/python3.10/site-packages/torch/functional.py:554: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /pytorch/aten/src/ATen/native/TensorShape.cpp:4314.)
-  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
-0000:   1%|          | 1/180 [00:34<1:42:18, 34.30s/it]0000:   1%|          | 2/180 [00:56<1:19:56, 26.95s/it]0000:   2%|▏         | 3/180 [01:17<1:11:56, 24.38s/it]0000:   2%|▏         | 4/180 [01:38<1:07:11, 22.91s/it]0000:   3%|▎         | 5/180 [02:00<1:06:44, 22.88s/it]0000:   3%|▎         | 6/180 [02:23<1:05:37, 22.63s/it]0000:   4%|▍         | 7/180 [02:44<1:03:45, 22.11s/it]0000:   4%|▍         | 8/180 [03:05<1:02:33, 21.82s/it]0000:   5%|▌         | 9/180 [03:25<1:00:24, 21.19s/it]0000:   6%|▌         | 10/180 [03:45<59:45, 21.09s/it] 0000:   6%|▌         | 11/180 [04:06<58:42, 20.84s/it]0000:   7%|▋         | 12/180 [04:25<57:19, 20.47s/it]0000:   7%|▋         | 13/180 [04:46<56:52, 20.43s/it]0000:   8%|▊         | 14/180 [05:06<56:25, 20.40s/it]0000:   8%|▊         | 15/180 [05:27<56:11, 20.43s/it]0000:   9%|▉         | 16/180 [05:50<57:55, 21.19s/it]0000:   9%|▉         | 17/180 [06:08<55:23, 20.39s/it]0000:  10%|█         | 18/180 [06:28<55:06, 20.41s/it]0000:  11%|█         | 19/180 [06:48<54:09, 20.18s/it]0000:  11%|█         | 20/180 [07:08<53:34, 20.09s/it]0000:  12%|█▏        | 21/180 [07:28<53:26, 20.17s/it]0000:  12%|█▏        | 22/180 [07:49<53:45, 20.42s/it]0000:  13%|█▎        | 23/180 [08:09<52:37, 20.11s/it]0000:  13%|█▎        | 24/180 [08:32<54:41, 21.03s/it]0000:  14%|█▍        | 25/180 [08:51<52:51, 20.46s/it]0000:  14%|█▍        | 26/180 [09:11<51:55, 20.23s/it]0000:  15%|█▌        | 27/180 [09:31<51:46, 20.30s/it]0000:  16%|█▌        | 28/180 [09:50<50:28, 19.92s/it]0000:  16%|█▌        | 29/180 [10:09<49:24, 19.63s/it]0000:  17%|█▋        | 30/180 [10:25<46:24, 18.56s/it]0000:  17%|█▋        | 31/180 [10:46<48:02, 19.35s/it]0000:  18%|█▊        | 32/180 [11:07<48:26, 19.64s/it]0000:  18%|█▊        | 33/180 [11:27<48:26, 19.77s/it]0000:  19%|█▉        | 34/180 [11:49<49:49, 20.48s/it]0000:  19%|█▉        | 35/180 [12:09<49:30, 20.49s/it]0000:  20%|██        | 36/180 [12:29<48:28, 20.20s/it]0000:  21%|██        | 37/180 [12:49<48:14, 20.24s/it]0000:  21%|██        | 38/180 [13:09<47:47, 20.20s/it]0000:  22%|██▏       | 39/180 [13:32<48:48, 20.77s/it]0000:  22%|██▏       | 40/180 [13:52<48:15, 20.68s/it]0000:  23%|██▎       | 41/180 [14:12<47:11, 20.37s/it]0000:  23%|██▎       | 42/180 [14:31<46:10, 20.07s/it]0000:  24%|██▍       | 43/180 [14:53<46:48, 20.50s/it]0000:  24%|██▍       | 44/180 [15:11<45:10, 19.93s/it]0000:  25%|██▌       | 45/180 [15:32<45:09, 20.07s/it]0000:  26%|██▌       | 46/180 [15:51<44:29, 19.92s/it]0000:  26%|██▌       | 47/180 [16:10<43:40, 19.70s/it]0000:  27%|██▋       | 48/180 [16:32<44:49, 20.37s/it]0000:  27%|██▋       | 49/180 [16:53<44:25, 20.35s/it]0000:  28%|██▊       | 50/180 [17:12<43:25, 20.04s/it]0000:  28%|██▊       | 51/180 [17:32<43:07, 20.06s/it]0000:  29%|██▉       | 52/180 [17:52<42:45, 20.04s/it]0000:  29%|██▉       | 53/180 [18:12<42:15, 19.96s/it]0000:  30%|███       | 54/180 [18:33<42:58, 20.46s/it]
+Skip 0000 as ./_interm_out/entities_custom_cropformer/0000.json exists
+
+============================================================
+Running: Computing entities (region proposals) (WID=0)
+Command: python3 TubeletGraph/entity_segmentation/cropformer.py -c configs/custom_0000.yaml -d custom -s 0000 --num_workers 1 --wid 0
+CUDA_VISIBLE_DEVICES: 0
+============================================================
+Config:
+  Tracker        : {'name': 'SAM2.1', 'module': 'SAM2', 'model_weights': './_ckpts/sam2.1_hiera_large.pt', 'model_cfg': 'configs/sam2.1/sam2.1_hiera_l.yaml', 'multi_mask': False}
+  Init Entity Thrd: 0.0005
+  Fill Entity Thrd: 0.0016
+  Fill Coverage Thrd: 0.25
+  Rm Init Entity Thrd: 0.75
+  Collect Spacing: 30
+  Prox Tracker   : {'name': 'SAM2.1', 'module': 'SAM2', 'model_weights': './_ckpts/sam2.1_hiera_large.pt', 'model_cfg': 'configs/sam2.1/sam2.1_hiera_l.yaml', 'multi_mask': True}
+  Paths          : {'intermdir': './_interm_out', 'outdir': './_pred_out', 'visdir': './_vis_out', 'evaldir': './_quant_out'}
+  Data           : {'name': 'custom', 'data_dir': './_custom_dataset', 'image_dir': './_custom_dataset/JPEGImages', 'anno_dir': './_custom_dataset/Annotations', 'split_dir': './splits/custom', 'image_format': '*.jpg', 'anno_format': '*.png', 'fps': 3}
+  Entity Method  : cropformer
+  Entity Dir     : ./_interm_out/entities_custom_cropformer
+  Config         : configs/custom_0000.yaml
+  Dataset        : custom
+  Split          : 0000
+  Num Workers    : 1
+  Wid            : 0
+====================
+Processing (0/1) 0000...
+Final path found, skipped
+Final path found, skipped
+
+============================================================
+Running: Computing tubelets (WID=0)
+Command: python3 TubeletGraph/tubelet/compute_tubelets_sam.py -c configs/custom_0000.yaml -d custom -s 0000 --num_workers 1 --wid 0
+CUDA_VISIBLE_DEVICES: 0
+============================================================
+/home/yizhou/miniconda3/envs/tubeletgraph/lib/python3.10/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/yizhou/Mprojects/VAD/TubeletGraph/./thirdparty/fc-clip/fcclip/modeling/pixel_decoder/msdeformattn.py:350: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  @autocast(enabled=False)
+WARNING:fvcore.common.checkpoint:Some model parameters or buffers are not found in the checkpoint:
+backbone.clip_model.ln_final.{bias, weight}
+backbone.clip_model.token_embedding.weight
+backbone.clip_model.transformer.resblocks.0.attn.out_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.0.attn.{in_proj_bias, in_proj_weight}
+backbone.clip_model.transformer.resblocks.0.ln_1.{bias, weight}
+backbone.clip_model.transformer.resblocks.0.ln_2.{bias, weight}
+backbone.clip_model.transformer.resblocks.0.mlp.c_fc.{bias, weight}
+backbone.clip_model.transformer.resblocks.0.mlp.c_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.1.attn.out_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.1.attn.{in_proj_bias, in_proj_weight}
+backbone.clip_model.transformer.resblocks.1.ln_1.{bias, weight}
+backbone.clip_model.transformer.resblocks.1.ln_2.{bias, weight}
+backbone.clip_model.transformer.resblocks.1.mlp.c_fc.{bias, weight}
+backbone.clip_model.transformer.resblocks.1.mlp.c_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.10.attn.out_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.10.attn.{in_proj_bias, in_proj_weight}
+backbone.clip_model.transformer.resblocks.10.ln_1.{bias, weight}
+backbone.clip_model.transformer.resblocks.10.ln_2.{bias, weight}
+backbone.clip_model.transformer.resblocks.10.mlp.c_fc.{bias, weight}
+backbone.clip_model.transformer.resblocks.10.mlp.c_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.11.attn.out_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.11.attn.{in_proj_bias, in_proj_weight}
+backbone.clip_model.transformer.resblocks.11.ln_1.{bias, weight}
+backbone.clip_model.transformer.resblocks.11.ln_2.{bias, weight}
+backbone.clip_model.transformer.resblocks.11.mlp.c_fc.{bias, weight}
+backbone.clip_model.transformer.resblocks.11.mlp.c_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.12.attn.out_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.12.attn.{in_proj_bias, in_proj_weight}
+backbone.clip_model.transformer.resblocks.12.ln_1.{bias, weight}
+backbone.clip_model.transformer.resblocks.12.ln_2.{bias, weight}
+backbone.clip_model.transformer.resblocks.12.mlp.c_fc.{bias, weight}
+backbone.clip_model.transformer.resblocks.12.mlp.c_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.13.attn.out_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.13.attn.{in_proj_bias, in_proj_weight}
+backbone.clip_model.transformer.resblocks.13.ln_1.{bias, weight}
+backbone.clip_model.transformer.resblocks.13.ln_2.{bias, weight}
+backbone.clip_model.transformer.resblocks.13.mlp.c_fc.{bias, weight}
+backbone.clip_model.transformer.resblocks.13.mlp.c_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.14.attn.out_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.14.attn.{in_proj_bias, in_proj_weight}
+backbone.clip_model.transformer.resblocks.14.ln_1.{bias, weight}
+backbone.clip_model.transformer.resblocks.14.ln_2.{bias, weight}
+backbone.clip_model.transformer.resblocks.14.mlp.c_fc.{bias, weight}
+backbone.clip_model.transformer.resblocks.14.mlp.c_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.15.attn.out_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.15.attn.{in_proj_bias, in_proj_weight}
+backbone.clip_model.transformer.resblocks.15.ln_1.{bias, weight}
+backbone.clip_model.transformer.resblocks.15.ln_2.{bias, weight}
+backbone.clip_model.transformer.resblocks.15.mlp.c_fc.{bias, weight}
+backbone.clip_model.transformer.resblocks.15.mlp.c_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.2.attn.out_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.2.attn.{in_proj_bias, in_proj_weight}
+backbone.clip_model.transformer.resblocks.2.ln_1.{bias, weight}
+backbone.clip_model.transformer.resblocks.2.ln_2.{bias, weight}
+backbone.clip_model.transformer.resblocks.2.mlp.c_fc.{bias, weight}
+backbone.clip_model.transformer.resblocks.2.mlp.c_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.3.attn.out_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.3.attn.{in_proj_bias, in_proj_weight}
+backbone.clip_model.transformer.resblocks.3.ln_1.{bias, weight}
+backbone.clip_model.transformer.resblocks.3.ln_2.{bias, weight}
+backbone.clip_model.transformer.resblocks.3.mlp.c_fc.{bias, weight}
+backbone.clip_model.transformer.resblocks.3.mlp.c_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.4.attn.out_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.4.attn.{in_proj_bias, in_proj_weight}
+backbone.clip_model.transformer.resblocks.4.ln_1.{bias, weight}
+backbone.clip_model.transformer.resblocks.4.ln_2.{bias, weight}
+backbone.clip_model.transformer.resblocks.4.mlp.c_fc.{bias, weight}
+backbone.clip_model.transformer.resblocks.4.mlp.c_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.5.attn.out_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.5.attn.{in_proj_bias, in_proj_weight}
+backbone.clip_model.transformer.resblocks.5.ln_1.{bias, weight}
+backbone.clip_model.transformer.resblocks.5.ln_2.{bias, weight}
+backbone.clip_model.transformer.resblocks.5.mlp.c_fc.{bias, weight}
+backbone.clip_model.transformer.resblocks.5.mlp.c_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.6.attn.out_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.6.attn.{in_proj_bias, in_proj_weight}
+backbone.clip_model.transformer.resblocks.6.ln_1.{bias, weight}
+backbone.clip_model.transformer.resblocks.6.ln_2.{bias, weight}
+backbone.clip_model.transformer.resblocks.6.mlp.c_fc.{bias, weight}
+backbone.clip_model.transformer.resblocks.6.mlp.c_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.7.attn.out_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.7.attn.{in_proj_bias, in_proj_weight}
+backbone.clip_model.transformer.resblocks.7.ln_1.{bias, weight}
+backbone.clip_model.transformer.resblocks.7.ln_2.{bias, weight}
+backbone.clip_model.transformer.resblocks.7.mlp.c_fc.{bias, weight}
+backbone.clip_model.transformer.resblocks.7.mlp.c_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.8.attn.out_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.8.attn.{in_proj_bias, in_proj_weight}
+backbone.clip_model.transformer.resblocks.8.ln_1.{bias, weight}
+backbone.clip_model.transformer.resblocks.8.ln_2.{bias, weight}
+backbone.clip_model.transformer.resblocks.8.mlp.c_fc.{bias, weight}
+backbone.clip_model.transformer.resblocks.8.mlp.c_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.9.attn.out_proj.{bias, weight}
+backbone.clip_model.transformer.resblocks.9.attn.{in_proj_bias, in_proj_weight}
+backbone.clip_model.transformer.resblocks.9.ln_1.{bias, weight}
+backbone.clip_model.transformer.resblocks.9.ln_2.{bias, weight}
+backbone.clip_model.transformer.resblocks.9.mlp.c_fc.{bias, weight}
+backbone.clip_model.transformer.resblocks.9.mlp.c_proj.{bias, weight}
+backbone.clip_model.visual.head.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.head.mlp.fc2.weight
+backbone.clip_model.visual.trunk.head.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.0.blocks.0.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.0.blocks.0.gamma
+backbone.clip_model.visual.trunk.stages.0.blocks.0.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.0.blocks.0.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.0.blocks.0.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.0.blocks.1.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.0.blocks.1.gamma
+backbone.clip_model.visual.trunk.stages.0.blocks.1.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.0.blocks.1.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.0.blocks.1.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.0.blocks.2.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.0.blocks.2.gamma
+backbone.clip_model.visual.trunk.stages.0.blocks.2.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.0.blocks.2.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.0.blocks.2.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.1.blocks.0.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.1.blocks.0.gamma
+backbone.clip_model.visual.trunk.stages.1.blocks.0.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.1.blocks.0.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.1.blocks.0.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.1.blocks.1.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.1.blocks.1.gamma
+backbone.clip_model.visual.trunk.stages.1.blocks.1.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.1.blocks.1.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.1.blocks.1.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.1.blocks.2.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.1.blocks.2.gamma
+backbone.clip_model.visual.trunk.stages.1.blocks.2.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.1.blocks.2.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.1.blocks.2.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.1.downsample.0.{bias, weight}
+backbone.clip_model.visual.trunk.stages.1.downsample.1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.0.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.0.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.0.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.0.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.0.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.1.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.1.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.1.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.1.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.1.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.10.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.10.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.10.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.10.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.10.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.11.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.11.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.11.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.11.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.11.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.12.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.12.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.12.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.12.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.12.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.13.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.13.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.13.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.13.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.13.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.14.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.14.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.14.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.14.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.14.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.15.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.15.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.15.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.15.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.15.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.16.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.16.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.16.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.16.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.16.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.17.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.17.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.17.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.17.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.17.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.18.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.18.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.18.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.18.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.18.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.19.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.19.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.19.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.19.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.19.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.2.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.2.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.2.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.2.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.2.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.20.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.20.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.20.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.20.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.20.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.21.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.21.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.21.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.21.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.21.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.22.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.22.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.22.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.22.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.22.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.23.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.23.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.23.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.23.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.23.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.24.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.24.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.24.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.24.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.24.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.25.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.25.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.25.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.25.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.25.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.26.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.26.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.26.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.26.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.26.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.3.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.3.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.3.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.3.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.3.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.4.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.4.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.4.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.4.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.4.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.5.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.5.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.5.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.5.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.5.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.6.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.6.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.6.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.6.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.6.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.7.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.7.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.7.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.7.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.7.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.8.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.8.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.8.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.8.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.8.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.9.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.9.gamma
+backbone.clip_model.visual.trunk.stages.2.blocks.9.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.9.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.blocks.9.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.downsample.0.{bias, weight}
+backbone.clip_model.visual.trunk.stages.2.downsample.1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.3.blocks.0.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.3.blocks.0.gamma
+backbone.clip_model.visual.trunk.stages.3.blocks.0.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.3.blocks.0.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.3.blocks.0.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.3.blocks.1.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.3.blocks.1.gamma
+backbone.clip_model.visual.trunk.stages.3.blocks.1.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.3.blocks.1.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.3.blocks.1.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.3.blocks.2.conv_dw.{bias, weight}
+backbone.clip_model.visual.trunk.stages.3.blocks.2.gamma
+backbone.clip_model.visual.trunk.stages.3.blocks.2.mlp.fc1.{bias, weight}
+backbone.clip_model.visual.trunk.stages.3.blocks.2.mlp.fc2.{bias, weight}
+backbone.clip_model.visual.trunk.stages.3.blocks.2.norm.{bias, weight}
+backbone.clip_model.visual.trunk.stages.3.downsample.0.{bias, weight}
+backbone.clip_model.visual.trunk.stages.3.downsample.1.{bias, weight}
+backbone.clip_model.visual.trunk.stem.0.{bias, weight}
+backbone.clip_model.visual.trunk.stem.1.{bias, weight}
+backbone.clip_model.{logit_scale, positional_embedding, text_projection}
+Skip 0000_1.json as ./_interm_out/tubelets_custom_cropformer_fcclip/0000_1.json exists
+Skip 0000_2.json as ./_interm_out/tubelets_custom_cropformer_fcclip/0000_2.json exists
+
+============================================================
+Running: Computing semantic similarity (WID=0)
+Command: python3 TubeletGraph/semantic_sim/compute_sim_fcclip.py -c configs/custom_0000.yaml -d custom -s 0000 -t tubelets_custom_cropformer --num_workers 1 --wid 0
+CUDA_VISIBLE_DEVICES: 0
+============================================================
+Config:
+	Dataset   : {'name': 'custom', 'data_dir': './_custom_dataset', 'image_dir': './_custom_dataset/JPEGImages', 'anno_dir': './_custom_dataset/Annotations', 'split_dir': './splits/custom', 'image_format': '*.jpg', 'anno_format': '*.png', 'fps': 3}
+	Method    : {'name': 'Ours', 'module': 'TubeletGraph', 'tubelet_dirname': 'tubelets_{}_cropformer_fcclip', 'thrds': {'mm_cover': 0.3, 'clip_sim_max': 0.7}}
+	Split     : 0000
+	Outdir    : ./_pred_out
+	Intermdir : ./_interm_out
+Running Ours on 2 annotations.
+
+Already computed: ./_pred_out/custom-0000-Ours/0000_1.json
+Already computed: ./_pred_out/custom-0000-Ours/0000_2.json
+Processing instances:   0%|          | 0/2 [00:00<?, ?it/s]Processing instances: 100%|██████████| 2/2 [00:00<00:00, 2828.26it/s]
+Skip 0000_2 as ./_pred_out/custom-0000-Ours_gpt-4.1/0000_2.json and ./_pred_out/custom-0000-Ours_gpt-4.1/0000_2.html exists
+Skip 0000_1 as ./_pred_out/custom-0000-Ours_gpt-4.1/0000_1.json and ./_pred_out/custom-0000-Ours_gpt-4.1/0000_1.html exists
+
+============================================================
+Running: Computing predictions
+Command: python3 TubeletGraph/get_prediction.py -c configs/custom_0000.yaml -d custom -s 0000 -m Ours
+============================================================
+
+============================================================
+Running: Obtaining state graph description
+Command: python3 TubeletGraph/vlm/prompt_vlm.py -c configs/custom_0000.yaml -p custom-0000-Ours
+============================================================
+Visualizing instances:   0%|          | 0/1 [00:00<?, ?it/s]Visualizing instances:   0%|          | 0/1 [00:00<?, ?it/s]
+Traceback (most recent call last):
+  File "/home/yizhou/Mprojects/VAD/TubeletGraph/eval/vis.py", line 369, in <module>
+    diagram_wrapper(
+  File "/home/yizhou/Mprojects/VAD/TubeletGraph/eval/vis.py", line 334, in diagram_wrapper
+    shapes, shape_arrows = create_shape_arrows_from_data(input_data, fps)
+  File "/home/yizhou/Mprojects/VAD/TubeletGraph/eval/vis.py", line 273, in create_shape_arrows_from_data
+    final_obj = DiagramShape(ii+1, 2, 'roundrect', obj_info['prior_desc'], get_obj_color(int(load_data[0]['id'])))
+KeyError: 'prior_desc'
+Visualizing instances:   0%|          | 0/1 [00:00<?, ?it/s]Visualizing instances:   0%|          | 0/1 [00:00<?, ?it/s]
+Traceback (most recent call last):
+  File "/home/yizhou/Mprojects/VAD/TubeletGraph/eval/vis.py", line 369, in <module>
+    diagram_wrapper(
+  File "/home/yizhou/Mprojects/VAD/TubeletGraph/eval/vis.py", line 334, in diagram_wrapper
+    shapes, shape_arrows = create_shape_arrows_from_data(input_data, fps)
+  File "/home/yizhou/Mprojects/VAD/TubeletGraph/eval/vis.py", line 273, in create_shape_arrows_from_data
+    final_obj = DiagramShape(ii+1, 2, 'roundrect', obj_info['prior_desc'], get_obj_color(int(load_data[0]['id'])))
+KeyError: 'prior_desc'
+Found 2 objects in mask: ['1', '2']
+================================================================================
+TubeletGraph Quick Demo
+================================================================================
+Base config:      configs/default.yaml
+Input directory:  /home/yizhou/Mprojects/VAD/TubeletGraph/assets/example/PhysAD/JPEGImages/0000/
+Input mask:       /home/yizhou/Mprojects/VAD/TubeletGraph/assets/example/PhysAD/Annotations/0000/0000000.png
+Object IDs:       ['1', '2']
+Method:           Ours
+FPS:              3
+================================================================================
+Removing existing link/directory: ./_custom_dataset/JPEGImages/0000
+
+============================================================
+✓ Single-Video Custom Dataset Created Successfully!
+============================================================
+  Video name:            0000
+  Input frame directory: ./_custom_dataset/JPEGImages/0000
+  Prompt object mask:    ./_custom_dataset/Annotations/0000/0000000.png
+  Split file:            ./splits/custom/0000.txt
+  New Config file:       configs/custom_0000.yaml
+  Image format:          *.jpg
+  Annotation format:     *.png
+  FPS:                   3
+============================================================
+
+
+================================================================================
+Step: Running TubeletGraph pipeline
+Command: python3 TubeletGraph/run.py -c configs/custom_0000.yaml -d custom -s 0000 -m Ours
+================================================================================
+
+
+✓ Running TubeletGraph pipeline completed successfully
+
+
+================================================================================
+Step: Visualizing object 1
+Command: python3 eval/vis.py -c configs/custom_0000.yaml -p custom-0000-Ours_gpt-4.1 -i 0000_1
+================================================================================
+
+
+✓ Visualizing object 1 completed successfully
+
+⚠ Warning: Visualization failed for object 1
+
+================================================================================
+Step: Visualizing object 2
+Command: python3 eval/vis.py -c configs/custom_0000.yaml -p custom-0000-Ours_gpt-4.1 -i 0000_2
+================================================================================
+
+
+✓ Visualizing object 2 completed successfully
+
+⚠ Warning: Visualization failed for object 2
+
+================================================================================
+✓ Quick demo completed successfully!
+================================================================================
+
+Results:
+  - Predictions:  ./_pred_out/custom-0000-Ours_gpt-4.1
+  - Visualizations:  ./_pred_out/predictions/custom-0000-Ours_gpt-4.1
+
+================================================================================
+
