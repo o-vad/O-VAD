@@ -1,0 +1,9 @@
+nohup: ignoring input
+usage: vlm_mask_grounded.py [-h] --input INPUT [--output_dir OUTPUT_DIR]
+                            [--vlm {claude,openai,ollama}] [--auto]
+                            [--threshold THRESHOLD] [--gui] [--keep_frames]
+                            [--frame FRAME] [--scan_frames]
+                            [--num_scan_frames NUM_SCAN_FRAMES]
+                            [--extract-bboxes]
+vlm_mask_grounded.py: error: unrecognized arguments:  
+/home/yizhou/Mprojects/VAD/script/vlm_mask_grounded.bash: line 35: --output_dir: command not found

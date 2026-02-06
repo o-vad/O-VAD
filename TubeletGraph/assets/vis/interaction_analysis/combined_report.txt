@@ -1,0 +1,227 @@
+================================================================================
+MULTI-OBJECT STATE TRANSFORMATION ANALYSIS REPORT
+================================================================================
+
+Video Duration: 5.97 seconds (180 frames)
+Frame Rate: 30 fps
+Total Objects Tracked: 2
+Total State Change Events: 24
+Detected Interactions: 7
+
+--------------------------------------------------------------------------------
+OBJECT SUMMARIES
+--------------------------------------------------------------------------------
+
+═══ Object 1 ═══
+  Description: Toothpaste tube (Darlie brand)
+  Initial State: Intact, unopened, not squeezed
+  Material: Plastic laminate (tube), likely contains toothpaste paste inside
+  Source File: 0000_1.json
+  State Changes: 12
+  Change Types: {'deformation': 11, 'surface_change': 1}
+  Severities: {'slight': 7, 'moderate': 5}
+
+═══ Object 2 ═══
+  Description: Syringe (without needle)
+  Initial State: Plunger fully depressed, no visible contents being dispensed
+  Material: Plastic
+  Source File: 0000_2.json
+  State Changes: 12
+  Change Types: {'deformation': 12}
+  Severities: {'slight': 6, 'moderate': 5, 'none': 1}
+
+--------------------------------------------------------------------------------
+DETECTED INTERACTIONS
+--------------------------------------------------------------------------------
+
+Interaction 1:
+  Objects: 1 ↔ 2
+  Time: 1.00s - 2.00s
+  Type: concurrent
+  Details: deformation + deformation
+
+Interaction 2:
+  Objects: 1 ↔ 2
+  Time: 1.67s - 2.00s
+  Type: concurrent
+  Details: deformation + deformation
+
+Interaction 3:
+  Objects: 1 ↔ 2
+  Time: 2.33s - 2.67s
+  Type: concurrent
+  Details: deformation + deformation
+
+Interaction 4:
+  Objects: 1 ↔ 2
+  Time: 3.00s - 3.33s
+  Type: concurrent
+  Details: deformation + deformation
+
+Interaction 5:
+  Objects: 1 ↔ 2
+  Time: 3.67s - 4.00s
+  Type: concurrent
+  Details: deformation + deformation
+
+Interaction 6:
+  Objects: 1 ↔ 2
+  Time: 4.67s - 5.00s
+  Type: concurrent
+  Details: deformation + deformation
+
+Interaction 7:
+  Objects: 1 ↔ 2
+  Time: 5.33s - 5.67s
+  Type: concurrent
+  Details: deformation + deformation
+
+--------------------------------------------------------------------------------
+ALL STATE CHANGE EVENTS (Chronological)
+--------------------------------------------------------------------------------
+
+Event 1 [Object 1]:
+  Time: 1.00s - 1.33s (frames 30-40)
+  Type: deformation
+  Severity: slight
+  Description: The tube has become slightly more compressed and flattened in the later frame, especially in the mid...
+
+Event 2 [Object 1]:
+  Time: 1.33s - 1.67s (frames 40-50)
+  Type: deformation
+  Severity: slight
+  Description: The tube has become slightly more compressed and flattened in the later frame, particularly in the m...
+
+Event 3 [Object 1]:
+  Time: 1.67s - 2.00s (frames 50-60)
+  Type: deformation
+  Severity: slight
+  Description: The tube has become slightly compressed and flattened in the later frame, especially near the center...
+
+Event 4 [Object 2]:
+  Time: 1.67s - 2.00s (frames 50-60)
+  Type: deformation
+  Severity: slight
+  Description: The highlighted object (a rectangular tool with a handle) has moved downward and is now pressing aga...
+
+Event 5 [Object 1]:
+  Time: 2.00s - 2.33s (frames 60-70)
+  Type: deformation
+  Severity: moderate
+  Description: The object (a tube) has become noticeably more compressed and flattened in the later frame. The pres...
+
+Event 6 [Object 2]:
+  Time: 2.00s - 2.33s (frames 60-70)
+  Type: deformation
+  Severity: moderate
+  Description: The highlighted object (the pressing tool) has moved downward and is now pressing into the tube, cau...
+
+Event 7 [Object 1]:
+  Time: 2.33s - 2.67s (frames 70-80)
+  Type: deformation
+  Severity: moderate
+  Description: The object (a tube) has become noticeably deformed in the later frame. The central area under the pr...
+
+Event 8 [Object 2]:
+  Time: 2.33s - 2.67s (frames 70-80)
+  Type: deformation
+  Severity: moderate
+  Description: The object highlighted with the pink contour (the pressing tool) has moved downward, causing the tub...
+
+Event 9 [Object 1]:
+  Time: 2.67s - 3.00s (frames 80-90)
+  Type: deformation
+  Severity: slight
+  Description: The object (a tube) has become more compressed in the later frame, especially in the area under the ...
+
+Event 10 [Object 2]:
+  Time: 2.67s - 3.00s (frames 80-90)
+  Type: deformation
+  Severity: slight
+  Description: The highlighted object (the pressing tool) shows a slight downward movement, resulting in increased ...
+
+Event 11 [Object 1]:
+  Time: 3.00s - 3.33s (frames 90-100)
+  Type: deformation
+  Severity: moderate
+  Description: The highlighted object (a tube) has undergone further compression in the later frame. The area under...
+
+Event 12 [Object 2]:
+  Time: 3.00s - 3.33s (frames 90-100)
+  Type: deformation
+  Severity: slight
+  Description: The green-and-white tube under the pressing device shows increased compression in the later frame. T...
+
+Event 13 [Object 2]:
+  Time: 3.33s - 3.67s (frames 100-110)
+  Type: deformation
+  Severity: slight
+  Description: The tube under the pressing device shows increased compression in the later frame. The area directly...
+
+Event 14 [Object 1]:
+  Time: 3.67s - 4.00s (frames 110-120)
+  Type: deformation
+  Severity: slight
+  Description: The object (a soft tube) has undergone slight deformation between the two frames. In the later frame...
+
+Event 15 [Object 2]:
+  Time: 3.67s - 4.00s (frames 110-120)
+  Type: deformation
+  Severity: moderate
+  Description: The object (the green and white tube) under the pressing device shows increased deformation in the s...
+
+Event 16 [Object 2]:
+  Time: 4.00s - 4.33s (frames 120-130)
+  Type: deformation
+  Severity: slight
+  Description: The object (highlighted in pink) has undergone a slight deformation between the two frames. In the s...
+
+Event 17 [Object 1]:
+  Time: 4.67s - 5.00s (frames 140-150)
+  Type: deformation
+  Severity: moderate
+  Description: The object (a soft tube or pouch) has become more compressed and flattened in the later frame, espec...
+
+Event 18 [Object 2]:
+  Time: 4.67s - 5.00s (frames 140-150)
+  Type: deformation
+  Severity: slight
+  Description: The object (the tube) under the highlighted device shows increased compression in the later frame. T...
+
+Event 19 [Object 1]:
+  Time: 5.00s - 5.33s (frames 150-160)
+  Type: deformation
+  Severity: moderate
+  Description: The object (a tube) has undergone a noticeable change in shape between the two frames. In the earlie...
+
+Event 20 [Object 2]:
+  Time: 5.00s - 5.33s (frames 150-160)
+  Type: deformation
+  Severity: moderate
+  Description: The object (a tube) under the pressing device has undergone a noticeable deformation. In the earlier...
+
+Event 21 [Object 1]:
+  Time: 5.33s - 5.67s (frames 160-170)
+  Type: deformation
+  Severity: slight
+  Description: The object (a tube) has become more compressed in the later frame, especially in the yellow section ...
+
+Event 22 [Object 2]:
+  Time: 5.33s - 5.67s (frames 160-170)
+  Type: deformation
+  Severity: moderate
+  Description: The object (the tube) under the pink contour has become more compressed and flattened in the later f...
+
+Event 23 [Object 1]:
+  Time: 5.67s - 5.97s (frames 170-179)
+  Type: surface_change
+  Severity: slight
+  Description: In the later frame, a small puncture or opening has appeared on the upper surface of the tube (near ...
+
+Event 24 [Object 2]:
+  Time: 5.67s - 5.97s (frames 170-179)
+  Type: deformation
+  Severity: none (for the tool itself; the deformation occurred to the tube, not the highlighted object)
+  Description: The highlighted object (a pressing tool) in the first frame is in contact with and pressing down on ...
+
+================================================================================

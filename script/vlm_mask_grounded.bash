@@ -26,7 +26,17 @@ export OPENAI_API_KEY="***REMOVED-CREDENTIAL***"
 # python generate_mask_grounded.py -i video.mp4 --vlm claude --auto --scan_frames
 # Or scan more frames
 # python generate_mask_grounded.py -i video.mp4 --vlm claude --auto --scan_frames --num_scan_frames 10
-python annotate/vlm_mask_grounded.py -i assets/example/PhysAD/0000.mp4 --vlm openai --auto --output_dir assets/example/PhysAD/ --scan_frames --threshold 0.1
+
+
+python annotate/vlm_mask_grounded.py \
+    -i assets/example/PhysAD/0000.mp4 \
+    --vlm openai \
+    --auto \ 
+    --output_dir assets/example/PhysAD/ \
+    --scan_frames \
+    --threshold 0.1 \
+    --extract-bboxes 
+
 
 
 
