@@ -385,28 +385,8 @@ Example format: ["red apple being cut", "kitchen knife with black handle", "gree
 
 Be specific and descriptive. List each distinct object separately."""
 
-    BBOX_DETECTION_PROMPT = """Analyze this image and identify ALL distinct objects with their bounding boxes.
-
-For each object, provide:
-1. A SHORT, SPECIFIC description (e.g., "red apple", "kitchen knife")
-2. Bounding box as [x1, y1, x2, y2] where coordinates are normalized (0-1):
-   - (0,0) is top-left of image
-   - (1,1) is bottom-right of image
-   - x1,y1 = top-left corner of object
-   - x2,y2 = bottom-right corner of object
-
-Return ONLY a JSON array, nothing else:
-[
-  {"name": "red apple", "bbox": [0.12, 0.34, 0.28, 0.56]},
-  {"name": "knife", "bbox": [0.45, 0.23, 0.67, 0.89]},
-  ...
-]
-
-Include all main trackable objects. Be precise with bbox coordinates."""
-
-    def __init__(self, vlm_type: str = "claude", extract_bboxes: bool = False):
+    def __init__(self, vlm_type: str = "claude"):
         self.vlm_type = vlm_type.lower()
-        self.extract_bboxes = extract_bboxes
         self._validate_setup()
     
     def _validate_setup(self):
@@ -437,11 +417,6 @@ Include all main trackable objects. Be precise with bbox coordinates."""
     
     def detect_objects(self, image_path: str) -> List[str]:
         """Detect objects in image using VLM."""
-        if self.extract_bboxes:
-            # Return just object names from bbox detection
-            objects_with_bboxes = self.detect_objects_with_bboxes(image_path)
-            return [obj["name"] for obj in objects_with_bboxes]
-        
         print(f"\nAnalyzing image with {self.vlm_type.upper()}...")
         
         if self.vlm_type == "claude":
@@ -450,26 +425,6 @@ Include all main trackable objects. Be precise with bbox coordinates."""
             return self._detect_with_openai(image_path)
         elif self.vlm_type == "ollama":
             return self._detect_with_ollama(image_path)
-        else:
-            raise ValueError(f"Unknown VLM type: {self.vlm_type}")
-    
-    def detect_objects_with_bboxes(self, image_path: str) -> List[Dict]:
-        """
-        Detect objects with bounding boxes using VLM.
-        Similar to "Thinking with Blueprints" paper approach.
-        
-        Returns:
-            List of dicts: [{"name": str, "bbox": [x1,y1,x2,y2], "confidence": float}, ...]
-            where bbox coordinates are normalized (0-1)
-        """
-        print(f"\nDetecting objects with bounding boxes using {self.vlm_type.upper()}...")
-        
-        if self.vlm_type == "claude":
-            return self._detect_bboxes_with_claude(image_path)
-        elif self.vlm_type == "openai":
-            return self._detect_bboxes_with_openai(image_path)
-        elif self.vlm_type == "ollama":
-            return self._detect_bboxes_with_ollama(image_path)
         else:
             raise ValueError(f"Unknown VLM type: {self.vlm_type}")
     
@@ -587,128 +542,6 @@ Include all main trackable objects. Be precise with bbox coordinates."""
                 objects.append(line)
         
         return objects
-    
-    def _detect_bboxes_with_claude(self, image_path: str) -> List[Dict]:
-        """Use Claude to detect objects with bounding boxes."""
-        import anthropic
-        
-        client = anthropic.Anthropic()
-        image_data = encode_image_base64(image_path)
-        media_type = get_image_media_type(image_path)
-        
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2048,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": image_data,
-                            },
-                        },
-                        {
-                            "type": "text",
-                            "text": self.BBOX_DETECTION_PROMPT
-                        }
-                    ],
-                }
-            ],
-        )
-        
-        response_text = message.content[0].text
-        return self._parse_bbox_list(response_text)
-    
-    def _detect_bboxes_with_openai(self, image_path: str) -> List[Dict]:
-        """Use GPT-4 to detect objects with bounding boxes."""
-        import openai
-        
-        client = openai.OpenAI()
-        image_data = encode_image_base64(image_path)
-        media_type = get_image_media_type(image_path)
-        
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{media_type};base64,{image_data}"
-                            }
-                        },
-                        {
-                            "type": "text",
-                            "text": self.BBOX_DETECTION_PROMPT
-                        }
-                    ],
-                }
-            ],
-            max_tokens=2048,
-        )
-        
-        response_text = response.choices[0].message.content
-        return self._parse_bbox_list(response_text)
-    
-    def _detect_bboxes_with_ollama(self, image_path: str) -> List[Dict]:
-        """Use local LLaVA via Ollama to detect objects with bounding boxes."""
-        import requests
-        
-        image_data = encode_image_base64(image_path)
-        
-        response = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": "llava",
-                "prompt": self.BBOX_DETECTION_PROMPT,
-                "images": [image_data],
-                "stream": False
-            },
-            timeout=120
-        )
-        
-        response_text = response.json()["response"]
-        return self._parse_bbox_list(response_text)
-    
-    def _parse_bbox_list(self, response: str) -> List[Dict]:
-        """Parse JSON array of objects with bboxes from VLM response."""
-        try:
-            # Remove markdown code blocks if present
-            json_text = response.strip()
-            if json_text.startswith("```"):
-                json_text = re.sub(r'^```(?:json)?\s*\n', '', json_text)
-                json_text = re.sub(r'\n```\s*$', '', json_text)
-            
-            # Find JSON array in response
-            match = re.search(r'\[.*\]', json_text, re.DOTALL)
-            if match:
-                objects = json.loads(match.group())
-                
-                # Validate and add confidence
-                validated_objects = []
-                for obj in objects:
-                    if isinstance(obj, dict) and "name" in obj and "bbox" in obj:
-                        bbox = obj["bbox"]
-                        # Validate bbox format
-                        if isinstance(bbox, list) and len(bbox) == 4:
-                            # Add confidence if not present
-                            if "confidence" not in obj:
-                                obj["confidence"] = 0.85  # Default confidence for VLM estimates
-                            validated_objects.append(obj)
-                
-                return validated_objects
-                
-        except json.JSONDecodeError as e:
-            print(f"Warning: Could not parse bbox JSON: {e}")
-            print(f"Response: {response[:200]}...")
-        
-        return []
 
 
 # ==============================================================================
@@ -1037,8 +870,7 @@ def visualize_detections(image_path: str, objects: List[str]) -> List[str]:
 def create_dataset_structure(
     input_processor: InputProcessor,
     mask: np.ndarray,
-    output_dir: Optional[str] = None,
-    bbox_data: Optional[List[Dict]] = None
+    output_dir: Optional[str] = None
 ) -> Dict:
     """
     Create complete TubeletGraph-compatible dataset structure.
@@ -1049,8 +881,7 @@ def create_dataset_structure(
         │   ├── 0000000.jpg
         │   └── ...
         ├── Annotations/<video_name>/
-        │   ├── 0000000.png
-        │   └── 0000000_bboxes.json (optional, if bbox_data provided)
+        │   └── 0000000.png
         └── splits/
             └── val.txt
     """
@@ -1069,13 +900,6 @@ def create_dataset_structure(
     mask_path = anno_dir / "0000000.png"
     save_vos_mask(mask, str(mask_path))
     
-    # Save bbox annotations if provided
-    bbox_path = None
-    if bbox_data:
-        bbox_path = anno_dir / "0000000_bboxes.json"
-        save_bbox_annotations(bbox_data, str(bbox_path), 
-                             image_size=(mask.shape[1], mask.shape[0]))
-    
     # Create splits directory and file
     splits_dir = base_dir / "splits"
     splits_dir.mkdir(parents=True, exist_ok=True)
@@ -1088,7 +912,7 @@ def create_dataset_structure(
         with open(split_file, 'a') as f:
             f.write(f"{video_name}\n")
     
-    result = {
+    return {
         "base_dir": str(base_dir),
         "frames_dir": str(input_processor.frames_dir),
         "anno_dir": str(anno_dir),
@@ -1098,58 +922,6 @@ def create_dataset_structure(
         "num_frames": input_processor.num_frames,
         "fps": input_processor.fps
     }
-    
-    if bbox_path:
-        result["bbox_path"] = str(bbox_path)
-    
-    return result
-
-
-def save_bbox_annotations(
-    objects_with_bboxes: List[Dict],
-    output_path: str,
-    image_size: Tuple[int, int]
-) -> None:
-    """
-    Save bounding box annotations to JSON file.
-    
-    Args:
-        objects_with_bboxes: List of objects with bbox info
-        output_path: Where to save JSON
-        image_size: (width, height) of image
-    """
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    w, h = image_size
-    
-    annotations = {
-        "image_size": {"width": w, "height": h},
-        "objects": []
-    }
-    
-    for i, obj in enumerate(objects_with_bboxes):
-        bbox = obj["bbox"]  # normalized [x1, y1, x2, y2]
-        
-        # Convert to pixel coordinates
-        x1, y1, x2, y2 = [
-            bbox[0] * w, bbox[1] * h,
-            bbox[2] * w, bbox[3] * h
-        ]
-        
-        annotations["objects"].append({
-            "id": i + 1,
-            "name": obj["name"],
-            "bbox_normalized": bbox,
-            "bbox_pixel": [x1, y1, x2, y2],
-            "confidence": obj.get("confidence", 1.0),
-            "description": obj.get("description", "")
-        })
-    
-    with open(output_path, 'w') as f:
-        json.dump(annotations, f, indent=2)
-    
-    print(f"✓ Saved bbox annotations to: {output_path}")
 
 
 # ==============================================================================
@@ -1293,7 +1065,7 @@ Examples:
                        help="Vision-Language Model to use")
     parser.add_argument("--auto", "-a", action="store_true",
                        help="Automatically segment all detected objects")
-    parser.add_argument("--threshold", "-t", type=float, default=0.3,
+    parser.add_argument("--threshold", "-t", type=float, default=0.1,
                        help="SAM3 confidence threshold (default: 0.3, try 0.1 for difficult objects)")
     parser.add_argument("--gui", "-g", action="store_true",
                        help="Use GUI for object selection (requires OpenCV)")
@@ -1305,8 +1077,6 @@ Examples:
                        help="Scan multiple frames to find best segmentation for all objects")
     parser.add_argument("--num_scan_frames", type=int, default=5,
                        help="Number of frames to scan when using --scan_frames (default: 5)")
-    parser.add_argument("--extract-bboxes", "-b", action="store_true",
-                       help="Extract bounding boxes using VLM (like 'Thinking with Blueprints')")
     
     args = parser.parse_args()
     
@@ -1324,8 +1094,6 @@ Examples:
     print(f"Frame index: {args.frame}")
     print(f"Scan frames: {args.scan_frames}")
     print(f"Threshold: {args.threshold}")
-    if args.extract_bboxes:
-        print(f"Extract bboxes: YES (like 'Thinking with Blueprints')")
     
     # Step 1: Process input (video/image/folder)
     input_processor = InputProcessor(args.input, args.output_dir, frame_index=args.frame)
@@ -1333,36 +1101,17 @@ Examples:
     try:
         first_frame_path, frames_dir = input_processor.process()
         
-        # Step 2: Detect objects with VLM (optionally with bboxes)
-        detector = VLMObjectDetector(args.vlm, extract_bboxes=args.extract_bboxes)
+        # Step 2: Detect objects with VLM
+        detector = VLMObjectDetector(args.vlm)
+        objects = detector.detect_objects(first_frame_path)
         
-        # Store bbox data if requested
-        objects_with_bboxes = None
+        if not objects:
+            print("\nNo objects detected in the image.")
+            sys.exit(1)
         
-        if args.extract_bboxes:
-            objects_with_bboxes = detector.detect_objects_with_bboxes(first_frame_path)
-            objects = [obj["name"] for obj in objects_with_bboxes]
-            
-            if not objects_with_bboxes:
-                print("\nNo objects detected in the image.")
-                sys.exit(1)
-            
-            print(f"\n✓ Detected {len(objects_with_bboxes)} objects with bounding boxes:")
-            for i, obj in enumerate(objects_with_bboxes, 1):
-                bbox = obj["bbox"]
-                print(f"  {i}. {obj['name']}")
-                print(f"      BBox: [{bbox[0]:.3f}, {bbox[1]:.3f}, {bbox[2]:.3f}, {bbox[3]:.3f}]")
-                print(f"      Confidence: {obj.get('confidence', 0):.2f}")
-        else:
-            objects = detector.detect_objects(first_frame_path)
-            
-            if not objects:
-                print("\nNo objects detected in the image.")
-                sys.exit(1)
-            
-            print(f"\n✓ Detected {len(objects)} objects:")
-            for i, obj in enumerate(objects, 1):
-                print(f"  {i}. {obj}")
+        print(f"\n✓ Detected {len(objects)} objects:")
+        for i, obj in enumerate(objects, 1):
+            print(f"  {i}. {obj}")
         
         # Step 3: Select objects to segment
         if args.auto:
@@ -1416,8 +1165,7 @@ Examples:
             dataset_info = create_dataset_structure(
                 input_processor,
                 mask,
-                args.output_dir,
-                bbox_data=objects_with_bboxes
+                args.output_dir
             )
             
             print("\n" + "="*60)
@@ -1434,13 +1182,6 @@ Examples:
                 matched = f" [matched: '{obj['matched_prompt']}']" if obj.get('matched_prompt') != obj['prompt'] else ""
                 print(f"  ID {obj['id']}: '{obj['prompt']}' (score: {obj['score']:.3f}){matched}{low_conf}")
             
-            # Show bbox info if extracted
-            if objects_with_bboxes:
-                print(f"\nBounding Boxes: {len(objects_with_bboxes)} objects")
-                for bbox_obj in objects_with_bboxes:
-                    bbox = bbox_obj["bbox"]
-                    print(f"  {bbox_obj['name']}: [{bbox[0]:.3f}, {bbox[1]:.3f}, {bbox[2]:.3f}, {bbox[3]:.3f}] (conf: {bbox_obj.get('confidence', 0):.2f})")
-            
             # Show failed objects and suggestions
             if metadata.get('failed'):
                 print(f"\nFailed to segment ({len(metadata['failed'])} objects):")
@@ -1455,8 +1196,6 @@ Examples:
             print(f"\nOutput files:")
             print(f"  Frames: {dataset_info['frames_dir']}")
             print(f"  Mask: {dataset_info['mask_path']}")
-            if 'bbox_path' in dataset_info:
-                print(f"  Bboxes: {dataset_info['bbox_path']}")
             print(f"  Split: {dataset_info['split_file']}")
             
             print(f"\nTo run TubeletGraph:")

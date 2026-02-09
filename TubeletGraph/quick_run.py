@@ -7,9 +7,6 @@ This script combines the following steps:
 2. Run TubeletGraph pipeline (entity segmentation, tubelets, semantic similarity, predictions)
 3. Visualize all predictions
 
-Note: If you generated masks with --extract-bboxes flag, the bounding box annotations
-will be saved alongside the mask as <mask_name>_bboxes.json for additional analysis.
-
 Usage:
     python quick_demo.py --input_dir <VIDEO_FRAME_DIR_PATH> --input_mask <ANNO_PNG_PATH> [--fps 30 --method Ours]
 """

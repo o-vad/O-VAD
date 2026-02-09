@@ -30,12 +30,11 @@ export OPENAI_API_KEY="***REMOVED-CREDENTIAL***"
 
 python annotate/vlm_mask_grounded.py \
     -i assets/example/PhysAD/0000.mp4 \
-    --vlm openai \
-    --auto \ 
     --output_dir assets/example/PhysAD/ \
-    --scan_frames \
+    --vlm openai \
+    --auto \
     --threshold 0.1 \
-    --extract-bboxes 
+    --scan_frames 
 
 
 

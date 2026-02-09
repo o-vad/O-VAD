@@ -12,9 +12,6 @@ Key changes from original:
 - Enhanced prompts for gripper/robot manipulation scenarios
 - Better handling of subtle transformations like toothpaste leaking
 
-Usage:
-    Replace the original prompt_vlm.py with this file, or import the enhanced
-    functions into your existing pipeline.
 """
 
 import json, cv2, os, sys, glob
@@ -116,11 +113,11 @@ def get_system_prompt():
 Your tasks include:
 1. Identifying objects and their current states
 2. Detecting ANY change in object appearance, shape, or material state
-3. Recognizing interactions between objects (gripping, pressing, squeezing)
+3. Recognizing interactions between objects (e.g. gripping, pressing, squeezing)
 4. Noticing subtle dynamics like material flow, deformation, or leaking
 
 Be thorough and observant. Even small, subtle changes are important to report.
-Pay special attention to:
+Pay special attention to specific state changes, for example:
 - Deformable objects (tubes, bags, soft materials)
 - Material release (liquids, pastes, powders coming out)
 - Pressure effects from contact with other objects
@@ -141,11 +138,13 @@ Please describe:
 1. Object name (be specific, e.g., "toothpaste tube" not just "tube")
 2. Current state (intact, squeezed, opened, etc.)
 3. Material type (plastic, metal, liquid inside, etc.)
+4. Bounding Box (spatial information).
 
 Answer format:
 OBJECT: [name]
 STATE: [current state]
-MATERIAL: [material]"""),
+MATERIAL: [material]
+BBOX: [bbox]"""),
     ]
     
     # Frame quality check
@@ -227,29 +226,13 @@ Are these semantically the same type of object?
 Answer: yes or no"""),
     ]
     
-    # Bounding box detection (NEW - similar to "Thinking with Blueprints")
-    prompt_messages_bbox = [
-        ('text', f"""Identify the bounding box for the object highlighted with {init_c_name} contour.
-
-Provide the bounding box as [x1, y1, x2, y2] where:
-- Coordinates are normalized (0-1)
-- (0,0) is top-left of image
-- (1,1) is bottom-right of image
-- x1,y1 = top-left corner of object
-- x2,y2 = bottom-right corner of object
-
-Answer ONLY with the JSON:
-{{"bbox": [x1, y1, x2, y2]}}"""),
-    ]
-    
     return {
         'identify': prompt_messages_id,
         'frame_check': prompt_messages_frame,
         'state_change': prompt_messages_state_change,
         'interaction': prompt_messages_interaction,
         'action': prompt_messages_action,
-        'semantic_class': prompt_messages_cls,
-        'bbox': prompt_messages_bbox
+        'semantic_class': prompt_messages_cls
     }
 
 
@@ -437,116 +420,6 @@ def detect_state_changes(
     return state_changes
 
 
-def extract_object_bboxes(
-    client,
-    model_name: str,
-    frame_paths: list,
-    pred_data: dict,
-    obj_idx: str,
-    init_color: np.ndarray,
-    init_c_name: str,
-    prompts: dict,
-    html_writer=None,
-    temperature: float = 0.0,
-    sample_interval: int = 30
-) -> dict:
-    """
-    Extract bounding boxes for tracked objects across frames.
-    Similar to "Thinking with Blueprints" paper approach - uses VLM's
-    native understanding to locate objects.
-    
-    Args:
-        client: OpenAI client
-        model_name: VLM model name  
-        frame_paths: List of frame file paths
-        pred_data: Prediction data with masks
-        obj_idx: Object ID to analyze
-        init_color: Color for visualization
-        init_c_name: Color name for prompts
-        prompts: Prompt templates
-        html_writer: Optional HTML writer
-        temperature: Sampling temperature
-        sample_interval: Frames between samples
-    
-    Returns:
-        Dict mapping frame_idx -> bbox [x1, y1, x2, y2] (normalized)
-    """
-    bbox_data = {}
-    predictions = pred_data.get('prediction', {})
-    
-    frame_indices = sorted([int(k) for k in predictions.keys()])
-    
-    if not frame_indices:
-        return bbox_data
-    
-    # Sample frames for bbox extraction
-    sample_frames = [frame_indices[0]]
-    for i in range(sample_interval, len(frame_indices), sample_interval):
-        sample_frames.append(frame_indices[i])
-    if frame_indices[-1] not in sample_frames and len(frame_indices) > 1:
-        sample_frames.append(frame_indices[-1])
-    
-    if html_writer:
-        html_writer.add_heading(f'Bounding Box Extraction for Object {obj_idx}', level=3)
-    
-    print(f"  Extracting bboxes for {len(sample_frames)} frames...")
-    
-    for frame_idx in sample_frames:
-        # Get mask for this frame
-        mask = predictions.get(str(frame_idx), {}).get(obj_idx)
-        
-        if mask is None:
-            continue
-        
-        # Load frame
-        img = imageio.imread(frame_paths[frame_idx])
-        
-        # Create masked image
-        img_masked = get_masked_image(img, mask, init_color)
-        
-        # Query VLM for bbox
-        content = [
-            prompts['bbox'][0],
-            ('image', img_masked),
-        ]
-        
-        try:
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": get_system_prompt()},
-                    {"role": "user", "content": get_user_content(content, html_writer=html_writer)}
-                ],
-                temperature=temperature,
-            )
-            
-            rsp = get_model_response(response, html_writer=html_writer)
-            
-            # Parse bbox from response
-            try:
-                # Try to extract JSON
-                json_match = re.search(r'\{.*?\}', rsp, re.DOTALL)
-                if json_match:
-                    parsed = json.loads(json_match.group())
-                    bbox = parsed.get('bbox')
-                    if bbox and isinstance(bbox, list) and len(bbox) == 4:
-                        bbox_data[frame_idx] = {
-                            'bbox': bbox,
-                            'confidence': 0.85  # VLM estimate
-                        }
-                        if html_writer:
-                            html_writer.add_text(f"Frame {frame_idx}: bbox = {bbox}")
-            except (json.JSONDecodeError, KeyError):
-                print(f"  Warning: Could not parse bbox for frame {frame_idx}")
-                continue
-                
-        except Exception as e:
-            print(f"  Error extracting bbox for frame {frame_idx}: {e}")
-            continue
-    
-    return bbox_data
-
-
 def analyze_object_interaction(
     client,
     model_name: str,
@@ -637,8 +510,6 @@ def get_parser():
     parser.add_argument('--temp', type=float, default=0.0, help='Temperature for sampling')
     parser.add_argument('--sample_interval', type=int, default=10, help='Frame interval for state change detection')
     parser.add_argument('--skip_state_change', action='store_true', help='Skip state change detection')
-    parser.add_argument('--extract-bboxes', action='store_true', help='Extract bounding boxes for tracked objects (like "Thinking with Blueprints")')
-    parser.add_argument('--bbox_sample_interval', type=int, default=30, help='Frame interval for bbox extraction')
     return parser
 
 
@@ -756,29 +627,6 @@ if __name__ == "__main__":
                 html_writer.add_text(f"Detected {len(state_changes)} state changes for object {prompt_obj_idx}")
             else:
                 html_writer.add_text(f"No state changes detected for object {prompt_obj_idx}")
-        
-        # =====================================================================
-        # Stage 1.5: Extract bounding boxes (NEW - like "Thinking with Blueprints")
-        # =====================================================================
-        if args.extract_bboxes:
-            html_writer.add_heading('Bounding Box Extraction', level=2)
-            
-            # Extract bboxes for the main tracked object
-            bbox_data = extract_object_bboxes(
-                client, model_name,
-                frame_paths, pred_data,
-                prompt_obj_idx,
-                init_color, init_c_name,
-                prompts, html_writer,
-                args.temp, args.bbox_sample_interval
-            )
-            
-            if bbox_data:
-                obj_info[prompt_obj_idx]['bboxes'] = bbox_data
-                html_writer.add_text(f"Extracted bboxes for {len(bbox_data)} frames")
-                print(f"  Extracted {len(bbox_data)} bboxes for object {prompt_obj_idx}")
-            else:
-                html_writer.add_text(f"No bboxes extracted for object {prompt_obj_idx}")
 
         # =====================================================================
         # Stage 2: Analyze newly appearing objects (original functionality)
@@ -924,3 +772,6 @@ if __name__ == "__main__":
         print(f"Saved: {new_pred_path}")
         print(f"  Objects: {list(obj_info.keys())}")
         print(f"  State changes: {len(state_change_events)}")
+
+
+        
