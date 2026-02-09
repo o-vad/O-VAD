@@ -1,0 +1,86 @@
+{
+  "video_name": "0000",
+  "prediction_name": "custom-0000-Ours_gpt-4.1",
+  "anomaly_detected": true,
+  "num_anomalies": 1,
+  "overall_severity": "medium",
+  "anomalies": [
+    {
+      "anomaly_id": "anomaly_0000",
+      "anomaly_type": "deformation_anomaly",
+      "anomaly_subtype": "unexpected_deformation",
+      "severity": "medium",
+      "description": "The tube deformed significantly under pressure, which may indicate excessive force or material weakness.",
+      "affected_objects": [
+        "tube"
+      ],
+      "evidence_frames": [
+        2
+      ],
+      "start_frame": 2,
+      "end_frame": 2,
+      "confidence": 0.8500000000000001,
+      "reasoning_trace": {
+        "step1_observation": "A tube is placed under a device labeled 'Backyard'. The device applies pressure to the tube, causing it to deform and dispense a white substance.",
+        "step2_expectation": "The device should apply controlled pressure to dispense the substance without causing leakage or damage to the tube.",
+        "step3_comparison": "The tube dispenses the substance as expected, but there is a noticeable deformation at the point of pressure application.",
+        "step4_causation": "The deformation could be due to excessive force applied by the device or a defect in the tube material.",
+        "step5_classification": "Anomaly classifications include: deformation_anomaly: unexpected_deformation and material_anomaly: unexpected_leakage.",
+        "step6_severity": "Severity is assessed as medium due to potential impact on product quality and possible equipment calibration issues."
+      }
+    }
+  ],
+  "reasoning_trace": [
+    {
+      "step_name": "observation",
+      "step_number": 1,
+      "input_context": "",
+      "output": "A tube is placed under a device labeled 'Backyard'. The device applies pressure to the tube, causing it to deform and dispense a white substance.",
+      "confidence": 1.0
+    },
+    {
+      "step_name": "expectation",
+      "step_number": 2,
+      "input_context": "",
+      "output": "The device should apply controlled pressure to dispense the substance without causing leakage or damage to the tube.",
+      "confidence": 1.0
+    },
+    {
+      "step_name": "comparison",
+      "step_number": 3,
+      "input_context": "",
+      "output": "The tube dispenses the substance as expected, but there is a noticeable deformation at the point of pressure application.",
+      "confidence": 1.0
+    },
+    {
+      "step_name": "causation",
+      "step_number": 4,
+      "input_context": "",
+      "output": "The deformation could be due to excessive force applied by the device or a defect in the tube material.",
+      "confidence": 1.0
+    },
+    {
+      "step_name": "classification",
+      "step_number": 5,
+      "input_context": "",
+      "output": "Anomaly classifications include: deformation_anomaly: unexpected_deformation and material_anomaly: unexpected_leakage.",
+      "confidence": 1.0
+    },
+    {
+      "step_name": "severity",
+      "step_number": 6,
+      "input_context": "",
+      "output": "Severity is assessed as medium due to potential impact on product quality and possible equipment calibration issues.",
+      "confidence": 1.0
+    }
+  ],
+  "state_changes": [],
+  "identified_events": [
+    "A tube is placed under a device labeled 'Backyard'",
+    "The device applies pressure to the tube, causing it to deform and dispense a white substance"
+  ],
+  "anomalous_transitions": [],
+  "summary": "The manipulation task exhibited medium severity anomalies, including unexpected deformation and potential leakage of the tube. These issues may affect product quality and suggest a need for equipment calibration or material inspection.",
+  "timestamp": "2026-02-09T21:33:01.807612",
+  "processing_time": 25.275955200195312
+}

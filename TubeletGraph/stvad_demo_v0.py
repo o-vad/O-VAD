@@ -11,20 +11,19 @@ Pipeline Stages:
 4. Anomaly Detection: Detect and explain anomalies using step-by-step VLM reasoning
 
 Usage:
-    python stvad_demo.py analyze <video_path> -c <config_path> [options]
-    python stvad_demo.py batch <video_dir> -c <config_path> [options]
+    python stvad_framework.py analyze <video_path> -c <config_path> [options]
+    python stvad_framework.py batch <video_dir> -c <config_path> [options]
 
 File Structure:
     This framework expects the following structure:
     TubeletGraph/
-    ├── stvad_demo.py (this file)
+    ├── stvad_framework.py (this file)
     ├── quick_run.py
     ├── annotate/
     │   └── vlm_mask_grounded.py
     └── TubeletGraph/
         └── vlm/
-            ├── prompt_vlm.py      # Stage 2: State tracking
-            └── prompt_vad.py      # Stage 3&4: Anomaly detection
+            └── prompt_vlm.py
 """
 
 import os
@@ -60,9 +59,6 @@ class STVADFramework:
         # Define script paths relative to base directory
         self.vlm_mask_script = osp.join(self.base_dir, "annotate", "vlm_mask_grounded.py")
         self.quick_run_script = osp.join(self.base_dir, "quick_run.py")
-        # Stage 3&4: Use prompt_vad.py for anomaly detection with chain-of-thought reasoning
-        self.prompt_vad_script = osp.join(self.base_dir, "TubeletGraph", "vlm", "prompt_vad.py")
-        # Stage 2 (optional): Use prompt_vlm.py for state tracking only
         self.prompt_vlm_script = osp.join(self.base_dir, "TubeletGraph", "vlm", "prompt_vlm.py")
         
         # Verify scripts exist
@@ -76,7 +72,7 @@ class STVADFramework:
         scripts = {
             "vlm_mask_grounded.py": self.vlm_mask_script,
             "quick_run.py": self.quick_run_script,
-            "prompt_vad.py": self.prompt_vad_script
+            "prompt_vlm.py": self.prompt_vlm_script
         }
         
         missing = []
@@ -93,7 +89,7 @@ class STVADFramework:
             print(f"  {self.base_dir}/")
             print(f"  ├── annotate/vlm_mask_grounded.py")
             print(f"  ├── quick_run.py")
-            print(f"  └── TubeletGraph/vlm/prompt_vad.py")
+            print(f"  └── TubeletGraph/vlm/prompt_vlm.py")
             sys.exit(1)
     
     def setup_directories(self):
@@ -285,27 +281,19 @@ class STVADFramework:
         video_path: str,
         prediction_name: str,
         sample_interval: int = 10,
-        detect_anomalies: bool = True,
-        vlm_model: str = "openai"
+        detect_anomalies: bool = True
     ) -> Tuple[Dict, bool]:
         """
         Stage 3 & 4: State Change Analysis and Anomaly Detection
         
-        Uses VLM with chain-of-thought reasoning to analyze object states 
-        and detect anomalies through a 6-step reasoning process:
-        1. Observation: What changes occurred?
-        2. Expectation: What should have happened?
-        3. Comparison: How do they differ?
-        4. Causation: What caused the deviation?
-        5. Classification: What type of anomaly?
-        6. Severity: How serious is it?
+        Uses VLM to analyze object states and detect anomalies through
+        step-by-step reasoning.
         
         Args:
             video_path: Path to original video
             prediction_name: Name of tracking predictions
             sample_interval: Interval for sampling frames
             detect_anomalies: Enable anomaly detection
-            vlm_model: VLM provider (openai, claude, ollama)
             
         Returns:
             Tuple of (anomaly_report, success)
@@ -314,22 +302,16 @@ class STVADFramework:
         self.log("STAGE 3 & 4: State Analysis and Anomaly Detection", "STAGE")
         self.log("="*60, "INFO")
         
-        # Build command for prompt_vad.py (the anomaly detection script)
         cmd = [
-            "python", self.prompt_vad_script,
+            "python", self.prompt_vlm_script,
             "-c", self.config_path,
             "-p", prediction_name,
             "--sample_interval", str(sample_interval),
-            "--video_path", video_path,
-            "--vlm", vlm_model,
-            "--output_dir", osp.join(self.output_dir, "anomaly_reports")
+            "--video_path", video_path
         ]
         
         if detect_anomalies:
             cmd.append("--detect_anomalies")
-        
-        if self.verbose:
-            cmd.append("-v")
         
         success, output = self.run_command(cmd, "VLM-based state analysis and anomaly detection")
         
@@ -363,94 +345,38 @@ class STVADFramework:
             "anomalies": [],
             "reasoning_trace": "",
             "identified_events": [],
-            "anomalous_transitions": [],
-            "num_anomalies": 0
+            "anomalous_transitions": []
         }
         
         # Parse output for key information
         if "ANOMALY DETECTION REPORT" in output:
             lines = output.split('\n')
             for i, line in enumerate(lines):
-                # Parse anomaly detection status
                 if "Anomaly Detected:" in line:
                     report["anomaly_detected"] = "True" in line
-                
-                # Parse number of anomalies
-                elif "Number of Anomalies:" in line:
-                    import re
-                    match = re.search(r'(\d+)', line)
-                    if match:
-                        report["num_anomalies"] = int(match.group(1))
-                
-                # Parse overall severity
-                elif "Overall Severity:" in line:
-                    severity = line.split(":")[-1].strip()
-                    report["overall_severity"] = severity
-                
-                # Capture reasoning trace
                 elif "Reasoning Trace:" in line:
+                    # Capture reasoning trace
                     trace_lines = []
-                    in_trace = True
-                    for j in range(i+1, len(lines)):
-                        if lines[j].startswith("=" * 10):
-                            # Check if this is the end of reasoning section
-                            if j + 1 < len(lines) and "Step 1:" in lines[j+1]:
-                                break
-                            in_trace = False
-                            break
-                        if in_trace and lines[j].strip():
-                            trace_lines.append(lines[j].strip())
-                    report["reasoning_trace"] = "\n".join(trace_lines)
-                
-                # Parse identified events (Step 1)
-                elif "Step 1: Identified events" in line or "Step 1:" in line:
                     for j in range(i+1, len(lines)):
                         if lines[j].strip() and not lines[j].startswith("="):
-                            if "Step 2" in lines[j]:
-                                break
-                            # Parse numbered events
-                            event_match = re.match(r'\s*\d+\.\s*(.+)', lines[j])
-                            if event_match:
-                                report["identified_events"].append(event_match.group(1))
+                            trace_lines.append(lines[j].strip())
                         elif lines[j].startswith("="):
                             break
-                
-                # Parse anomalous transitions (Step 2)
-                elif "anomalous transitions" in line.lower():
+                    report["reasoning_trace"] = "\n".join(trace_lines)
+                elif "Step 1: Identified events" in line:
+                    # Parse identified events
+                    for j in range(i+1, len(lines)):
+                        if lines[j].strip() and "Step 2" not in lines[j]:
+                            report["identified_events"].append(lines[j].strip())
+                        elif "Step 2" in lines[j]:
+                            break
+                elif "anomalous transitions" in line:
+                    # Extract number of anomalous transitions
                     import re
                     match = re.search(r'(\d+)\s+anomalous', line)
                     if match:
                         num_anomalies = int(match.group(1))
-                        if report["num_anomalies"] == 0:
-                            report["num_anomalies"] = num_anomalies
-                
-                # Parse individual anomalies
-                elif line.strip().startswith("[anomaly_"):
-                    anomaly = {"id": line.strip().strip("[]")}
-                    for j in range(i+1, min(i+8, len(lines))):
-                        aline = lines[j].strip()
-                        if aline.startswith("Type:"):
-                            anomaly["type"] = aline.split(":", 1)[1].strip()
-                        elif aline.startswith("Severity:"):
-                            anomaly["severity"] = aline.split(":", 1)[1].strip()
-                        elif aline.startswith("Description:"):
-                            anomaly["description"] = aline.split(":", 1)[1].strip()
-                        elif aline.startswith("Confidence:"):
-                            anomaly["confidence"] = aline.split(":", 1)[1].strip()
-                        elif aline.startswith("[anomaly_") or aline.startswith("="):
-                            break
-                    if "type" in anomaly:
-                        report["anomalies"].append(anomaly)
-                
-                # Parse summary
-                elif "Summary:" in line:
-                    summary_lines = []
-                    for j in range(i+1, len(lines)):
-                        if lines[j].startswith("="):
-                            break
-                        if lines[j].strip():
-                            summary_lines.append(lines[j].strip())
-                    report["summary"] = " ".join(summary_lines)
+                        report["num_anomalies"] = num_anomalies
         
         return report
     
@@ -478,7 +404,6 @@ Path: {video_path}
 DETECTION RESULT:
   Anomaly Detected: {'YES ❌' if report['anomaly_detected'] else 'NO ✅'}
   Number of Anomalies: {report.get('num_anomalies', 0)}
-  Overall Severity: {report.get('overall_severity', 'N/A')}
 
 {'='*80}
 REASONING TRACE:
@@ -495,25 +420,14 @@ IDENTIFIED EVENTS:
         else:
             summary += "No events identified\n"
         
-        if report.get('anomalies'):
-            summary += f"\n{'='*80}\nDETECTED ANOMALIES:\n{'='*80}\n"
-            for anomaly in report['anomalies']:
-                summary += f"\n  [{anomaly.get('id', 'unknown')}]\n"
-                summary += f"    Type: {anomaly.get('type', 'unknown')}\n"
-                summary += f"    Severity: {anomaly.get('severity', 'unknown')}\n"
-                summary += f"    Description: {anomaly.get('description', 'N/A')}\n"
-        
         summary += f"\n{'='*80}\n"
-        
-        if report.get('summary'):
-            summary += f"\nSUMMARY: {report['summary']}\n"
         
         return summary
     
     def analyze_video(
         self,
         video_path: str,
-        vlm_model: str = "openai",
+        vlm_model: str = "gpt4v",
         target_fps: int = 10,
         sample_interval: int = 10,
         method: str = "Ours",
@@ -537,8 +451,6 @@ IDENTIFIED EVENTS:
         self.log(f"ST-VAD Framework: Analyzing {video_path}", "INFO")
         self.log("="*80, "INFO")
         
-        video_name = Path(video_path).stem
-        
         # Stage 1: Object Grounding
         frames_dir, mask_path, stage1_success = self.stage1_object_grounding(
             video_path, vlm_model, target_fps, auto_mode
@@ -559,8 +471,7 @@ IDENTIFIED EVENTS:
         
         # Stage 3 & 4: State Analysis and Anomaly Detection
         anomaly_report, stage3_success = self.stage3_state_analysis(
-            video_path, prediction_name, sample_interval, 
-            detect_anomalies=True, vlm_model=vlm_model
+            video_path, prediction_name, sample_interval, detect_anomalies=True
         )
         
         if not stage3_success:
@@ -676,28 +587,27 @@ def get_parser():
         epilog="""
 Examples:
     # Analyze a single video
-    python stvad_demo.py analyze video.mp4 -c configs/default.yaml
+    python stvad_framework.py analyze video.mp4 -c configs/default.yaml
     
     # Analyze with custom settings
-    python stvad_demo.py analyze video.mp4 -c configs/default.yaml --vlm claude --fps 15
+    python stvad_framework.py analyze video.mp4 -c configs/default.yaml --vlm claude --fps 15
     
     # Batch process videos in a directory
-    python stvad_demo.py batch ./videos -c configs/default.yaml
+    python stvad_framework.py batch ./videos -c configs/default.yaml
     
     # Specify output directory
-    python stvad_demo.py analyze video.mp4 -c configs/default.yaml -o ./results
+    python stvad_framework.py analyze video.mp4 -c configs/default.yaml -o ./results
 
 File Structure:
     This script expects to be placed in the TubeletGraph directory with:
     TubeletGraph/
-    ├── stvad_demo.py (this file)
+    ├── stvad_framework.py (this file)
     ├── quick_run.py
     ├── annotate/
     │   └── vlm_mask_grounded.py
     └── TubeletGraph/
         └── vlm/
-            ├── prompt_vlm.py      # State tracking
-            └── prompt_vad.py      # Anomaly detection (required)
+            └── prompt_vlm.py
         """
     )
     
@@ -708,9 +618,7 @@ File Structure:
     analyze_parser.add_argument('video', help='Path to video file')
     analyze_parser.add_argument('-c', '--config', required=True, help='Path to TubeletGraph config')
     analyze_parser.add_argument('-o', '--output', default='output', help='Output directory')
-    analyze_parser.add_argument('--vlm', default='openai', 
-                               choices=['openai', 'claude', 'ollama'],
-                               help='VLM provider (default: openai)')
+    analyze_parser.add_argument('--vlm', default='openai', help='VLM model (gpt4v, claude, etc.)')
     analyze_parser.add_argument('--fps', type=int, default=10, help='Target FPS')
     analyze_parser.add_argument('--sample_interval', type=int, default=10, help='Sampling interval')
     analyze_parser.add_argument('--method', default='Ours', help='Tracking method')
@@ -722,9 +630,7 @@ File Structure:
     batch_parser.add_argument('video_dir', help='Directory containing videos')
     batch_parser.add_argument('-c', '--config', required=True, help='Path to TubeletGraph config')
     batch_parser.add_argument('-o', '--output', default='output', help='Output directory')
-    batch_parser.add_argument('--vlm', default='openai',
-                             choices=['openai', 'claude', 'ollama'],
-                             help='VLM provider (default: openai)')
+    batch_parser.add_argument('--vlm', default='gpt4v', help='VLM model')
     batch_parser.add_argument('--fps', type=int, default=10, help='Target FPS')
     batch_parser.add_argument('--sample_interval', type=int, default=10, help='Sampling interval')
     batch_parser.add_argument('--method', default='Ours', help='Tracking method')
