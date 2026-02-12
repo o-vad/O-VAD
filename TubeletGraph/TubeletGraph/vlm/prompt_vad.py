@@ -437,14 +437,29 @@ def create_vlm_client(provider: str, api_key: Optional[str] = None, model: Optio
 # =============================================================================
 
 SYSTEM_PROMPT_ANOMALY = """You are an expert anomaly detection system for industrial processes.
-Your role is to:
-1. Carefully observe object states and changes over time
-2. Compare observations against expected normal behaviors
-3. Identify deviations that indicate anomalies or failures
-4. Classify anomalies by type and severity
-5. Provide clear step-by-step reasoning for your assessments
+You have access to object tracking data including object metadata (descriptions, materials, 
+initial states) and fine-grained state change events detected across video frames.
 
-Be thorough but avoid false positives. Consider physical plausibility and context."""
+Your role is to:
+1. Carefully study the tracked object metadata and state change events provided
+2. Observe object states and changes grounded in this tracking data
+3. Compare observations against expected normal behaviors for these specific materials/objects
+4. Identify deviations that indicate anomalies or failures
+5. Freely classify anomalies based on your broad domain knowledge
+6. Provide clear step-by-step reasoning grounded in the evidence from tracking
+
+Be thorough but avoid false positives. Consider physical plausibility and context.
+Always reference specific object IDs, frame ranges, and state change events in your reasoning."""
+
+# SYSTEM_PROMPT_ANOMALY = """You are an expert anomaly detection system for industrial processes.
+# Your role is to:
+# 1. Carefully observe object states and changes over time
+# 2. Compare observations against expected normal behaviors
+# 3. Identify deviations that indicate anomalies or failures
+# 4. Classify anomalies by type and severity
+# 5. Provide clear step-by-step reasoning for your assessments
+
+# Be thorough but avoid false positives. Consider physical plausibility and context."""
 
 
 PROMPT_STATE_ANALYSIS = """Analyze the state changes detected in this manipulation video.
@@ -475,42 +490,120 @@ Output as JSON:
 }}"""
 
 
+# PROMPT_ANOMALY_REASONING = """You are analyzing video of a manipulation task for anomalies.
+
+# TASK CONTEXT:
+# {task_context}
+
+# TRACKED OBJECTS:
+# {object_info}
+
+# STATE CHANGES DETECTED:
+# {state_changes}
+
+# Follow this 6-step reasoning chain:
+
+# STEP 1 - OBSERVATION:
+# What specific changes and events occurred? List the facts observed.
+
+# STEP 2 - EXPECTATION:
+# Given the task, what should have happened? What is normal behavior for this process?
+
+# STEP 3 - COMPARISON:
+# How do observations differ from expectations? What specific deviations exist?
+
+# STEP 4 - CAUSATION:
+# What could cause these deviations? Consider:
+# - Equipment issues (gripper, tool, sensor malfunction)
+# - Material issues (defect, wrong material, contamination)
+# - Process issues (wrong sequence, timing, parameters)
+# - Environmental issues (obstruction, lighting, position)
+
+# STEP 5 - CLASSIFICATION:
+# Classify any anomalies found into these categories:
+# - manipulation_failure: grip_slip, incomplete_grasp, excessive_force, misalignment
+# - material_anomaly: unexpected_leakage, no_dispensing, contamination, wrong_material
+# - deformation_anomaly: unexpected_deformation, insufficient_deformation, structural_damage, recovery_failure
+# - process_anomaly: sequence_error, timing_anomaly, missing_step, extra_operation
+# - environmental_anomaly: obstruction, position_drift, lighting_change
+
+# STEP 6 - SEVERITY ASSESSMENT:
+# Rate severity (none/low/medium/high/critical) based on:
+# - Impact on task completion
+# - Safety implications
+# - Quality implications
+# - Reversibility of the issue
+
+# Output your analysis as JSON:
+# {{
+#   "reasoning": {{
+#     "step1_observation": "detailed observations...",
+#     "step2_expectation": "expected normal behavior...",
+#     "step3_comparison": "deviations found...",
+#     "step4_causation": "possible causes...",
+#     "step5_classification": "anomaly classifications...",
+#     "step6_severity": "severity assessment..."
+#   }},
+#   "anomalies": [
+#     {{
+#       "anomaly_type": "type from taxonomy",
+#       "anomaly_subtype": "subtype from taxonomy",
+#       "severity": "none/low/medium/high/critical",
+#       "description": "detailed description",
+#       "affected_objects": ["obj_ids"],
+#       "evidence_frames": [frame_numbers],
+#       "confidence": 0.0-1.0
+#     }}
+#   ],
+#   "is_anomalous": true/false,
+#   "overall_severity": "none/low/medium/high/critical",
+#   "summary": "one paragraph summary of findings"
+# }}"""
+
 PROMPT_ANOMALY_REASONING = """You are analyzing video of a manipulation task for anomalies.
 
 TASK CONTEXT:
 {task_context}
 
-TRACKED OBJECTS:
+TRACKED OBJECTS (from automatic detection and tracking):
 {object_info}
 
-STATE CHANGES DETECTED:
+STATE CHANGES DETECTED (from object-centric state tracking):
 {state_changes}
 
-Follow this 6-step reasoning chain:
+Follow this 6-step reasoning chain. Ground every step in the tracked object 
+metadata and state change events provided above.
 
 STEP 1 - OBSERVATION:
-What specific changes and events occurred? List the facts observed.
+What specific changes and events occurred? Reference the tracked objects by 
+their IDs and descriptions. Cite the frame ranges and state change types from 
+the tracking data. Note each object's material, initial state, and how it evolved.
 
 STEP 2 - EXPECTATION:
-Given the task, what should have happened? What is normal behavior for this process?
+Given the task context and the objects' materials/properties, what should have 
+happened? What constitutes normal behavior for these specific objects and this 
+process? Consider physical plausibility given the materials involved.
 
 STEP 3 - COMPARISON:
-How do observations differ from expectations? What specific deviations exist?
+How do the observed state changes differ from expectations? Be specific:
+which object, which frames, what change was unexpected and why?
 
 STEP 4 - CAUSATION:
-What could cause these deviations? Consider:
-- Equipment issues (gripper, tool, sensor malfunction)
-- Material issues (defect, wrong material, contamination)
-- Process issues (wrong sequence, timing, parameters)
-- Environmental issues (obstruction, lighting, position)
+What could cause these deviations? Reason freely — consider equipment issues, 
+material defects, process errors, environmental factors, or any other plausible 
+cause. Do NOT limit yourself to predefined categories.
 
 STEP 5 - CLASSIFICATION:
-Classify any anomalies found into these categories:
-- manipulation_failure: grip_slip, incomplete_grasp, excessive_force, misalignment
-- material_anomaly: unexpected_leakage, no_dispensing, contamination, wrong_material
-- deformation_anomaly: unexpected_deformation, insufficient_deformation, structural_damage, recovery_failure
-- process_anomaly: sequence_error, timing_anomaly, missing_step, extra_operation
-- environmental_anomaly: obstruction, position_drift, lighting_change
+Classify any anomalies you found using your own judgment. You are free to name 
+the anomaly type and subtype based on what you observe — there is no fixed taxonomy.
+For reference, here are some EXAMPLES of anomaly types seen in industrial settings, 
+but you should create your own labels if none of these fit:
+  - manipulation_failure (e.g., grip slip, misalignment)
+  - material_anomaly (e.g., unexpected leakage, contamination)
+  - deformation_anomaly (e.g., structural damage, recovery failure)
+  - process_anomaly (e.g., wrong sequence, missing step)
+  - environmental_anomaly (e.g., obstruction, position drift)
+These are only examples. Use whatever classification best describes your findings.
 
 STEP 6 - SEVERITY ASSESSMENT:
 Rate severity (none/low/medium/high/critical) based on:
@@ -522,27 +615,27 @@ Rate severity (none/low/medium/high/critical) based on:
 Output your analysis as JSON:
 {{
   "reasoning": {{
-    "step1_observation": "detailed observations...",
-    "step2_expectation": "expected normal behavior...",
-    "step3_comparison": "deviations found...",
+    "step1_observation": "detailed observations referencing object IDs, frames, state changes...",
+    "step2_expectation": "expected normal behavior given materials and task...",
+    "step3_comparison": "specific deviations with object IDs and frame ranges...",
     "step4_causation": "possible causes...",
-    "step5_classification": "anomaly classifications...",
-    "step6_severity": "severity assessment..."
+    "step5_classification": "your anomaly classifications (free-form, not restricted to examples)...",
+    "step6_severity": "severity assessment with justification..."
   }},
   "anomalies": [
     {{
-      "anomaly_type": "type from taxonomy",
-      "anomaly_subtype": "subtype from taxonomy",
+      "anomaly_type": "your chosen type (free-form)",
+      "anomaly_subtype": "your chosen subtype (free-form)",
       "severity": "none/low/medium/high/critical",
-      "description": "detailed description",
-      "affected_objects": ["obj_ids"],
-      "evidence_frames": [frame_numbers],
+      "description": "detailed description referencing tracked objects and state changes",
+      "affected_objects": ["obj_ids from tracking data"],
+      "evidence_frames": [frame_numbers from state change events],
       "confidence": 0.0-1.0
     }}
   ],
   "is_anomalous": true/false,
   "overall_severity": "none/low/medium/high/critical",
-  "summary": "one paragraph summary of findings"
+  "summary": "one paragraph summary grounded in the tracking data"
 }}"""
 
 
@@ -617,24 +710,50 @@ def load_prediction(prediction_dir: str, config: Dict) -> Dict:
             logger.warning(f"Failed to load {jf}: {e}")
             continue
         
-        # Merge obj_info
+        # # Merge obj_info
+        # if "obj_info" in data and isinstance(data["obj_info"], dict):
+        #     pred_data["obj_info"].update(data["obj_info"])
+        
+        # # Merge state_change_events
+        # if "state_change_events" in data and isinstance(data["state_change_events"], list):
+        #     pred_data["state_change_events"].extend(data["state_change_events"])
+        
+        # # Merge frame-by-frame prediction masks
+        # if "prediction" in data and isinstance(data["prediction"], dict):
+        #     for frame_key, frame_masks in data["prediction"].items():
+        #         if frame_key not in pred_data["prediction"]:
+        #             pred_data["prediction"][frame_key] = {}
+        #         pred_data["prediction"][frame_key].update(frame_masks)
+        
+        # logger.info(f"Loaded: {jf.name}")
+         # Derive object ID from filename: 0000_1.json → obj_id "1"
+        
+        stem = jf.stem  # e.g., "0000_1"
+        file_obj_id = stem.rsplit("_", 1)[-1] if "_" in stem else stem
+        
+        # Merge obj_info, re-keyed by the file-derived object ID
         if "obj_info" in data and isinstance(data["obj_info"], dict):
-            pred_data["obj_info"].update(data["obj_info"])
+            for orig_key, obj_data in data["obj_info"].items():
+                # Use file_obj_id as the canonical key to avoid collisions
+                pred_data["obj_info"][file_obj_id] = obj_data
         
-        # Merge state_change_events
+        # Merge state_change_events, ensuring object_idx matches file_obj_id
         if "state_change_events" in data and isinstance(data["state_change_events"], list):
-            pred_data["state_change_events"].extend(data["state_change_events"])
+            for event in data["state_change_events"]:
+                event["object_idx"] = file_obj_id  # normalize to file-derived ID
+                pred_data["state_change_events"].append(event)
         
-        # Merge frame-by-frame prediction masks
+        # Merge frame-by-frame prediction masks, re-keyed per object
         if "prediction" in data and isinstance(data["prediction"], dict):
             for frame_key, frame_masks in data["prediction"].items():
                 if frame_key not in pred_data["prediction"]:
                     pred_data["prediction"][frame_key] = {}
-                pred_data["prediction"][frame_key].update(frame_masks)
+                for orig_obj_key, mask_val in frame_masks.items():
+                    pred_data["prediction"][frame_key][file_obj_id] = mask_val
         
-        logger.info(f"Loaded: {jf.name}")
+        logger.info(f"Loaded: {jf.name} (object {file_obj_id})")
     
-    # Convert state_change_events → state_changes list for analyze_state_changes()
+    # Convert state_change_events → state_changes list
     for event in pred_data["state_change_events"]:
         obj_idx = event.get("object_idx", "unknown")
         obj_info = pred_data["obj_info"].get(obj_idx, {})
@@ -651,8 +770,27 @@ def load_prediction(prediction_dir: str, config: Dict) -> Dict:
     n_obj = len(pred_data["obj_info"])
     n_events = len(pred_data["state_change_events"])
     logger.info(f"Aggregated {len(json_files)} files: {n_obj} objects, {n_events} state change events")
-    
     return pred_data
+
+    # # Convert state_change_events → state_changes list for analyze_state_changes()
+    # for event in pred_data["state_change_events"]:
+    #     obj_idx = event.get("object_idx", "unknown")
+    #     obj_info = pred_data["obj_info"].get(obj_idx, {})
+    #     pred_data["state_changes"].append({
+    #         "obj_id": obj_idx,
+    #         "obj_name": obj_info.get("desc", "object"),
+    #         "start_frame": event.get("start_frame", 0),
+    #         "end_frame": event.get("end_frame", 0),
+    #         "change_type": event.get("change_type", "unknown"),
+    #         "description": event.get("description", ""),
+    #         "severity": event.get("severity", "slight"),
+    #     })
+    
+    # n_obj = len(pred_data["obj_info"])
+    # n_events = len(pred_data["state_change_events"])
+    # logger.info(f"Aggregated {len(json_files)} files: {n_obj} objects, {n_events} state change events")
+    
+
 
 # def load_prediction(prediction_dir: str, config: Dict) -> Dict:
 #     """
@@ -923,8 +1061,53 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
         # Parse response
         result = self.parse_json_response(response)
         
-        # Store reasoning steps
+        # # Store reasoning steps
+        # reasoning = result.get("reasoning", {})
+        # for i, (step_name, step_output) in enumerate([
+        #     ("observation", reasoning.get("step1_observation", "")),
+        #     ("expectation", reasoning.get("step2_expectation", "")),
+        #     ("comparison", reasoning.get("step3_comparison", "")),
+        #     ("causation", reasoning.get("step4_causation", "")),
+        #     ("classification", reasoning.get("step5_classification", "")),
+        #     ("severity", reasoning.get("step6_severity", ""))
+        # ]):
+        #     self.reasoning_steps.append(ReasoningStep(
+        #         step_name=step_name,
+        #         step_number=i + 1,
+        #         input_context="",
+        #         output=step_output
+        #     ))
+        
         reasoning = result.get("reasoning", {})
+        
+        # Build input context for each step (what information fed into it)
+        step_contexts = {
+            "observation": (
+                f"Objects tracked: {object_info_str[:500]}\n"
+                f"State changes from tracking: {state_changes_str[:500]}\n"
+                f"Frames provided: {len(images) if images else 0}"
+            ),
+            "expectation": (
+                f"Task context: {task_context}\n"
+                f"Observation output: {reasoning.get('step1_observation', '')[:300]}"
+            ),
+            "comparison": (
+                f"Observation: {reasoning.get('step1_observation', '')[:300]}\n"
+                f"Expectation: {reasoning.get('step2_expectation', '')[:300]}"
+            ),
+            "causation": (
+                f"Deviations found: {reasoning.get('step3_comparison', '')[:300]}"
+            ),
+            "classification": (
+                f"Observations: {reasoning.get('step1_observation', '')[:200]}\n"
+                f"Causes: {reasoning.get('step4_causation', '')[:200]}"
+            ),
+            "severity": (
+                f"Classification: {reasoning.get('step5_classification', '')[:200]}\n"
+                f"Affected objects: {[sc.obj_name for sc in state_changes]}"
+            ),
+        }
+        
         for i, (step_name, step_output) in enumerate([
             ("observation", reasoning.get("step1_observation", "")),
             ("expectation", reasoning.get("step2_expectation", "")),
@@ -936,9 +1119,9 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
             self.reasoning_steps.append(ReasoningStep(
                 step_name=step_name,
                 step_number=i + 1,
-                input_context="",
+                input_context=step_contexts.get(step_name, ""),
                 output=step_output
-            ))
+            ))        
         
         return result
     

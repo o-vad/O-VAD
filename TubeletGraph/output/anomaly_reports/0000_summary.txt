@@ -8,7 +8,7 @@ Path: assets/example/PhysAD/0000.mp4
 
 DETECTION RESULT:
   Anomaly Detected: YES ❌
-  Number of Anomalies: 1
+  Number of Anomalies: 2
   Overall Severity: medium
 
 ================================================================================
@@ -28,6 +28,11 @@ DETECTED ANOMALIES:
   [anomaly_0000]
     Type: deformation_anomaly/unexpected_deformation
     Severity: medium
-    Description: The tube deformed significantly under pressure, which may indicate excessive force or material weakness.
+    Description: The tube deforms significantly under the pressing tool, indicating excessive force or misalignment.
+
+  [anomaly_0001]
+    Type: material_anomaly/unexpected_leakage
+    Severity: medium
+    Description: White paste is released from the tube, which may not be intended unless the task is to dispense the paste.
 
 ================================================================================
