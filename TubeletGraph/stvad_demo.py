@@ -339,190 +339,262 @@ class STVADFramework:
         
         return base_name
     
+    # def stage3_state_analysis(
+    #     self,
+    #     video_path: str,
+    #     prediction_name: str,
+    #     sample_interval: int = 10,
+    #     detect_anomalies: bool = True,
+    #     vlm_model: str = "openai"
+    # ) -> Tuple[Dict, bool]:
+    #     """
+    #     Stage 3 & 4: State Change Analysis and Anomaly Detection
+        
+    #     Uses VLM with chain-of-thought reasoning to analyze object states 
+    #     and detect anomalies through a 6-step reasoning process:
+    #     1. Observation: What changes occurred?
+    #     2. Expectation: What should have happened?
+    #     3. Comparison: How do they differ?
+    #     4. Causation: What caused the deviation?
+    #     5. Classification: What type of anomaly?
+    #     6. Severity: How serious is it?
+        
+    #     Args:
+    #         video_path: Path to original video
+    #         prediction_name: Name of tracking predictions
+    #         sample_interval: Interval for sampling frames
+    #         detect_anomalies: Enable anomaly detection
+    #         vlm_model: VLM provider (openai, claude, ollama)
+            
+    #     Returns:
+    #         Tuple of (anomaly_report, success)
+    #     """
+    #     self.log("="*60, "INFO")
+    #     self.log("STAGE 3 & 4: State Analysis and Anomaly Detection", "STAGE")
+    #     self.log("="*60, "INFO")
+        
+    #     # Build command for prompt_vad.py (the anomaly detection script)
+    #     cmd = [
+    #         "python", self.prompt_vad_script,
+    #         "-c", self.config_path,
+    #         "-p", prediction_name,
+    #         "--sample_interval", str(sample_interval),
+    #         "--video_path", video_path,
+    #         "--vlm", vlm_model,
+    #         "--output_dir", osp.join(self.output_dir, "anomaly_reports")
+    #     ]
+        
+    #     if detect_anomalies:
+    #         cmd.append("--detect_anomalies")
+        
+    #     if self.verbose:
+    #         cmd.append("-v")
+        
+    #     success, output = self.run_command(cmd, "VLM-based state analysis and anomaly detection")
+        
+    #     # Parse anomaly report from output
+    #     report = self.parse_anomaly_report(output, prediction_name)
+        
+    #     # Save report
+    #     video_name = Path(video_path).stem
+    #     report_path = osp.join(self.output_dir, "anomaly_reports", f"{video_name}_report.json")
+    #     with open(report_path, 'w') as f:
+    #         json.dump(report, f, indent=2)
+        
+    #     self.log(f"Anomaly report saved to: {report_path}", "SUCCESS")
+        
+    #     return report, success
     def stage3_state_analysis(
-        self,
-        video_path: str,
-        prediction_name: str,
-        sample_interval: int = 10,
-        detect_anomalies: bool = True,
-        vlm_model: str = "openai"
-    ) -> Tuple[Dict, bool]:
-        """
-        Stage 3 & 4: State Change Analysis and Anomaly Detection
-        
-        Uses VLM with chain-of-thought reasoning to analyze object states 
-        and detect anomalies through a 6-step reasoning process:
-        1. Observation: What changes occurred?
-        2. Expectation: What should have happened?
-        3. Comparison: How do they differ?
-        4. Causation: What caused the deviation?
-        5. Classification: What type of anomaly?
-        6. Severity: How serious is it?
-        
-        Args:
-            video_path: Path to original video
-            prediction_name: Name of tracking predictions
-            sample_interval: Interval for sampling frames
-            detect_anomalies: Enable anomaly detection
-            vlm_model: VLM provider (openai, claude, ollama)
+            self,
+            video_path: str,
+            prediction_name: str,
+            sample_interval: int = 10,
+            detect_anomalies: bool = True,
+            vlm_model: str = "openai"
+        ) -> Tuple[Dict, bool]:
+            """
+            Stage 3 & 4: State Change Analysis and Anomaly Detection
             
-        Returns:
-            Tuple of (anomaly_report, success)
-        """
-        self.log("="*60, "INFO")
-        self.log("STAGE 3 & 4: State Analysis and Anomaly Detection", "STAGE")
-        self.log("="*60, "INFO")
-        
-        # Build command for prompt_vad.py (the anomaly detection script)
-        cmd = [
-            "python", self.prompt_vad_script,
-            "-c", self.config_path,
-            "-p", prediction_name,
-            "--sample_interval", str(sample_interval),
-            "--video_path", video_path,
-            "--vlm", vlm_model,
-            "--output_dir", osp.join(self.output_dir, "anomaly_reports")
-        ]
-        
-        if detect_anomalies:
-            cmd.append("--detect_anomalies")
-        
-        if self.verbose:
-            cmd.append("-v")
-        
-        success, output = self.run_command(cmd, "VLM-based state analysis and anomaly detection")
-        
-        # Parse anomaly report from output
-        report = self.parse_anomaly_report(output, prediction_name)
-        
-        # Save report
-        video_name = Path(video_path).stem
-        report_path = osp.join(self.output_dir, "anomaly_reports", f"{video_name}_report.json")
-        with open(report_path, 'w') as f:
-            json.dump(report, f, indent=2)
-        
-        self.log(f"Anomaly report saved to: {report_path}", "SUCCESS")
-        
-        return report, success
+            Runs prompt_vad.py which saves a full JSON report, then reads it back.
+            Does NOT overwrite the report — prompt_vad.py is the authoritative source.
+            """
+            self.log("="*60, "INFO")
+            self.log("STAGE 3 & 4: State Analysis and Anomaly Detection", "STAGE")
+            self.log("="*60, "INFO")
+            
+            video_name = Path(video_path).stem
+            report_dir = osp.join(self.output_dir, "anomaly_reports")
+            
+            # Build command for prompt_vad.py
+            cmd = [
+                "python", self.prompt_vad_script,
+                "-c", self.config_path,
+                "-p", prediction_name,
+                "--sample_interval", str(sample_interval),
+                "--video_path", video_path,
+                "--vlm", vlm_model,
+                "--output_dir", report_dir
+            ]
+            
+            if detect_anomalies:
+                cmd.append("--detect_anomalies")
+            
+            if self.verbose:
+                cmd.append("-v")
+            
+            success, output = self.run_command(cmd, "VLM-based state analysis and anomaly detection")
+            
+            # Read the JSON report that prompt_vad.py already saved
+            # (do NOT parse stdout or overwrite the file)
+            report_path = osp.join(report_dir, f"{video_name}_report.json")
+            report = self._load_report_json(report_path, prediction_name)
+            
+            self.log(f"Anomaly report loaded from: {report_path}", "SUCCESS")
+            
+            return report, success
     
-    def parse_anomaly_report(self, output: str, prediction_name: str) -> Dict:
+    def _load_report_json(self, report_path: str, prediction_name: str) -> Dict:
         """
-        Parse anomaly detection output into structured report.
+        Load the JSON report saved by prompt_vad.py.
+        Falls back to an empty report structure if the file doesn't exist.
+        """
+        if osp.isfile(report_path):
+            try:
+                with open(report_path, 'r') as f:
+                    report = json.load(f)
+                self.log(f"Loaded report: {len(report.get('anomalies', []))} anomalies, "
+                         f"severity={report.get('overall_severity', 'N/A')}", "INFO")
+                return report
+            except (json.JSONDecodeError, IOError) as e:
+                self.log(f"Failed to read report JSON: {e}", "WARNING")
         
-        Args:
-            output: Raw output from VLM analysis
-            prediction_name: Name of the prediction
-            
-        Returns:
-            Structured anomaly report dictionary
-        """
-        report = {
+        # Fallback empty report
+        self.log(f"Report file not found: {report_path}", "WARNING")
+        return {
             "prediction_name": prediction_name,
             "anomaly_detected": False,
+            "num_anomalies": 0,
+            "overall_severity": "N/A",
             "anomalies": [],
-            "reasoning_trace": "",
+            "reasoning_trace": [],
+            "state_changes": [],
             "identified_events": [],
-            "anomalous_transitions": [],
-            "num_anomalies": 0
+            "summary": ""
         }
-        
-        # Parse output for key information
-        if "ANOMALY DETECTION REPORT" in output:
-            lines = output.split('\n')
-            for i, line in enumerate(lines):
-                # Parse anomaly detection status
-                if "Anomaly Detected:" in line:
-                    report["anomaly_detected"] = "True" in line
-                
-                # Parse number of anomalies
-                elif "Number of Anomalies:" in line:
-                    import re
-                    match = re.search(r'(\d+)', line)
-                    if match:
-                        report["num_anomalies"] = int(match.group(1))
-                
-                # Parse overall severity
-                elif "Overall Severity:" in line:
-                    severity = line.split(":")[-1].strip()
-                    report["overall_severity"] = severity
-                
-                # Capture reasoning trace
-                elif "Reasoning Trace:" in line:
-                    trace_lines = []
-                    in_trace = True
-                    for j in range(i+1, len(lines)):
-                        if lines[j].startswith("=" * 10):
-                            # Check if this is the end of reasoning section
-                            if j + 1 < len(lines) and "Step 1:" in lines[j+1]:
-                                break
-                            in_trace = False
-                            break
-                        if in_trace and lines[j].strip():
-                            trace_lines.append(lines[j].strip())
-                    report["reasoning_trace"] = "\n".join(trace_lines)
-                
-                # Parse identified events (Step 1)
-                elif "Step 1: Identified events" in line or "Step 1:" in line:
-                    for j in range(i+1, len(lines)):
-                        if lines[j].strip() and not lines[j].startswith("="):
-                            if "Step 2" in lines[j]:
-                                break
-                            # Parse numbered events
-                            event_match = re.match(r'\s*\d+\.\s*(.+)', lines[j])
-                            if event_match:
-                                report["identified_events"].append(event_match.group(1))
-                        elif lines[j].startswith("="):
-                            break
-                
-                # Parse anomalous transitions (Step 2)
-                elif "anomalous transitions" in line.lower():
-                    import re
-                    match = re.search(r'(\d+)\s+anomalous', line)
-                    if match:
-                        num_anomalies = int(match.group(1))
-                        if report["num_anomalies"] == 0:
-                            report["num_anomalies"] = num_anomalies
-                
-                # Parse individual anomalies
-                elif line.strip().startswith("[anomaly_"):
-                    anomaly = {"id": line.strip().strip("[]")}
-                    for j in range(i+1, min(i+8, len(lines))):
-                        aline = lines[j].strip()
-                        if aline.startswith("Type:"):
-                            anomaly["type"] = aline.split(":", 1)[1].strip()
-                        elif aline.startswith("Severity:"):
-                            anomaly["severity"] = aline.split(":", 1)[1].strip()
-                        elif aline.startswith("Description:"):
-                            anomaly["description"] = aline.split(":", 1)[1].strip()
-                        elif aline.startswith("Confidence:"):
-                            anomaly["confidence"] = aline.split(":", 1)[1].strip()
-                        elif aline.startswith("[anomaly_") or aline.startswith("="):
-                            break
-                    if "type" in anomaly:
-                        report["anomalies"].append(anomaly)
-                
-                # Parse summary
-                elif "Summary:" in line:
-                    summary_lines = []
-                    for j in range(i+1, len(lines)):
-                        if lines[j].startswith("="):
-                            break
-                        if lines[j].strip():
-                            summary_lines.append(lines[j].strip())
-                    report["summary"] = " ".join(summary_lines)
-        
-        return report
+
+
     
+    # def parse_anomaly_report(self, output: str, prediction_name: str) -> Dict:
+    #     """
+    #     Parse anomaly detection output into structured report.
+        
+    #     Args:
+    #         output: Raw output from VLM analysis
+    #         prediction_name: Name of the prediction
+            
+    #     Returns:
+    #         Structured anomaly report dictionary
+    #     """
+    #     report = {
+    #         "prediction_name": prediction_name,
+    #         "anomaly_detected": False,
+    #         "anomalies": [],
+    #         "reasoning_trace": "",
+    #         "identified_events": [],
+    #         "anomalous_transitions": [],
+    #         "num_anomalies": 0
+    #     }
+        
+    #     # Parse output for key information
+    #     if "ANOMALY DETECTION REPORT" in output:
+    #         lines = output.split('\n')
+    #         for i, line in enumerate(lines):
+    #             # Parse anomaly detection status
+    #             if "Anomaly Detected:" in line:
+    #                 report["anomaly_detected"] = "True" in line
+                
+    #             # Parse number of anomalies
+    #             elif "Number of Anomalies:" in line:
+    #                 import re
+    #                 match = re.search(r'(\d+)', line)
+    #                 if match:
+    #                     report["num_anomalies"] = int(match.group(1))
+                
+    #             # Parse overall severity
+    #             elif "Overall Severity:" in line:
+    #                 severity = line.split(":")[-1].strip()
+    #                 report["overall_severity"] = severity
+                
+    #             # Capture reasoning trace
+    #             elif "Reasoning Trace:" in line:
+    #                 trace_lines = []
+    #                 in_trace = True
+    #                 for j in range(i+1, len(lines)):
+    #                     if lines[j].startswith("=" * 10):
+    #                         # Check if this is the end of reasoning section
+    #                         if j + 1 < len(lines) and "Step 1:" in lines[j+1]:
+    #                             break
+    #                         in_trace = False
+    #                         break
+    #                     if in_trace and lines[j].strip():
+    #                         trace_lines.append(lines[j].strip())
+    #                 report["reasoning_trace"] = "\n".join(trace_lines)
+                
+    #             # Parse identified events (Step 1)
+    #             elif "Step 1: Identified events" in line or "Step 1:" in line:
+    #                 for j in range(i+1, len(lines)):
+    #                     if lines[j].strip() and not lines[j].startswith("="):
+    #                         if "Step 2" in lines[j]:
+    #                             break
+    #                         # Parse numbered events
+    #                         event_match = re.match(r'\s*\d+\.\s*(.+)', lines[j])
+    #                         if event_match:
+    #                             report["identified_events"].append(event_match.group(1))
+    #                     elif lines[j].startswith("="):
+    #                         break
+                
+    #             # Parse anomalous transitions (Step 2)
+    #             elif "anomalous transitions" in line.lower():
+    #                 import re
+    #                 match = re.search(r'(\d+)\s+anomalous', line)
+    #                 if match:
+    #                     num_anomalies = int(match.group(1))
+    #                     if report["num_anomalies"] == 0:
+    #                         report["num_anomalies"] = num_anomalies
+                
+    #             # Parse individual anomalies
+    #             elif line.strip().startswith("[anomaly_"):
+    #                 anomaly = {"id": line.strip().strip("[]")}
+    #                 for j in range(i+1, min(i+8, len(lines))):
+    #                     aline = lines[j].strip()
+    #                     if aline.startswith("Type:"):
+    #                         anomaly["type"] = aline.split(":", 1)[1].strip()
+    #                     elif aline.startswith("Severity:"):
+    #                         anomaly["severity"] = aline.split(":", 1)[1].strip()
+    #                     elif aline.startswith("Description:"):
+    #                         anomaly["description"] = aline.split(":", 1)[1].strip()
+    #                     elif aline.startswith("Confidence:"):
+    #                         anomaly["confidence"] = aline.split(":", 1)[1].strip()
+    #                     elif aline.startswith("[anomaly_") or aline.startswith("="):
+    #                         break
+    #                 if "type" in anomaly:
+    #                     report["anomalies"].append(anomaly)
+                
+    #             # Parse summary
+    #             elif "Summary:" in line:
+    #                 summary_lines = []
+    #                 for j in range(i+1, len(lines)):
+    #                     if lines[j].startswith("="):
+    #                         break
+    #                     if lines[j].strip():
+    #                         summary_lines.append(lines[j].strip())
+    #                 report["summary"] = " ".join(summary_lines)
+        
+    #     return report
+
     def generate_summary_report(self, report: Dict, video_path: str) -> str:
         """
-        Generate human-readable summary report.
-        
-        Args:
-            report: Anomaly report dictionary
-            video_path: Path to video
-            
-        Returns:
-            Formatted summary string
+        Generate human-readable summary from the prompt_vad.py JSON report.
         """
         video_name = Path(video_path).stem
         
@@ -532,42 +604,136 @@ ST-VAD ANOMALY DETECTION REPORT
 {'='*80}
 Video: {video_name}
 Path: {video_path}
+Prediction: {report.get('prediction_name', 'N/A')}
+Processing Time: {report.get('processing_time', 0):.1f}s
 {'='*80}
 
 DETECTION RESULT:
-  Anomaly Detected: {'YES ❌' if report['anomaly_detected'] else 'NO ✅'}
+  Anomaly Detected: {'YES ❌' if report.get('anomaly_detected', False) else 'NO ✅'}
   Number of Anomalies: {report.get('num_anomalies', 0)}
   Overall Severity: {report.get('overall_severity', 'N/A')}
 
 {'='*80}
 REASONING TRACE:
 {'='*80}
-{report.get('reasoning_trace', 'No reasoning trace available')}
-
-{'='*80}
-IDENTIFIED EVENTS:
-{'='*80}
 """
-        if report.get('identified_events'):
-            for i, event in enumerate(report['identified_events'], 1):
-                summary += f"{i}. {event}\n"
+        # reasoning_trace is a list of step dicts from prompt_vad.py
+        reasoning_trace = report.get('reasoning_trace', [])
+        if isinstance(reasoning_trace, list):
+            for step in reasoning_trace:
+                step_num = step.get('step_number', '?')
+                step_name = step.get('step_name', 'unknown').upper()
+                step_output = step.get('output', '(no output)')
+                summary += f"\n  Step {step_num} - {step_name}:\n    {step_output}\n"
+        elif isinstance(reasoning_trace, str) and reasoning_trace:
+            summary += reasoning_trace
         else:
-            summary += "No events identified\n"
+            summary += "  No reasoning trace available\n"
         
-        if report.get('anomalies'):
+        summary += f"\n{'='*80}\nIDENTIFIED EVENTS:\n{'='*80}\n"
+        events = report.get('identified_events', [])
+        if events:
+            for i, event in enumerate(events, 1):
+                summary += f"  {i}. {event}\n"
+        else:
+            summary += "  No events identified\n"
+        
+        anomalies = report.get('anomalies', [])
+        if anomalies:
             summary += f"\n{'='*80}\nDETECTED ANOMALIES:\n{'='*80}\n"
-            for anomaly in report['anomalies']:
-                summary += f"\n  [{anomaly.get('id', 'unknown')}]\n"
-                summary += f"    Type: {anomaly.get('type', 'unknown')}\n"
+            for anomaly in anomalies:
+                aid = anomaly.get('anomaly_id', 'unknown')
+                summary += f"\n  [{aid}]\n"
+                summary += f"    Type: {anomaly.get('anomaly_type', 'unknown')}"
+                subtype = anomaly.get('anomaly_subtype', '')
+                if subtype:
+                    summary += f" / {subtype}"
+                summary += "\n"
                 summary += f"    Severity: {anomaly.get('severity', 'unknown')}\n"
+                summary += f"    Confidence: {anomaly.get('confidence', 0):.2f}\n"
                 summary += f"    Description: {anomaly.get('description', 'N/A')}\n"
+                affected = anomaly.get('affected_objects', [])
+                if affected:
+                    summary += f"    Affected Objects: {', '.join(str(o) for o in affected)}\n"
+                frames = anomaly.get('evidence_frames', [])
+                if frames:
+                    summary += f"    Evidence Frames: {frames}\n"
         
         summary += f"\n{'='*80}\n"
         
-        if report.get('summary'):
-            summary += f"\nSUMMARY: {report['summary']}\n"
+        report_summary = report.get('summary', '')
+        if report_summary:
+            summary += f"\nSUMMARY:\n  {report_summary}\n"
         
+        # Include tracked object info if available
+        state_changes = report.get('state_changes', [])
+        if state_changes:
+            summary += f"\n{'='*80}\nSTATE CHANGES ({len(state_changes)} tracked):\n{'='*80}\n"
+            for sc in state_changes[:10]:  # show first 10
+                summary += (f"  [{sc.get('obj_name', 'object')}] "
+                           f"Frames {sc.get('start_frame', '?')}-{sc.get('end_frame', '?')}: "
+                           f"{sc.get('change_type', '?')} ({sc.get('severity', '?')})\n")
+            if len(state_changes) > 10:
+                summary += f"  ... and {len(state_changes) - 10} more\n"
+        
+        summary += f"\n{'='*80}\n"
         return summary
+    
+#     def generate_summary_report(self, report: Dict, video_path: str) -> str:
+#         """
+#         Generate human-readable summary report.
+        
+#         Args:
+#             report: Anomaly report dictionary
+#             video_path: Path to video
+            
+#         Returns:
+#             Formatted summary string
+#         """
+#         video_name = Path(video_path).stem
+        
+#         summary = f"""
+# {'='*80}
+# ST-VAD ANOMALY DETECTION REPORT
+# {'='*80}
+# Video: {video_name}
+# Path: {video_path}
+# {'='*80}
+
+# DETECTION RESULT:
+#   Anomaly Detected: {'YES ❌' if report['anomaly_detected'] else 'NO ✅'}
+#   Number of Anomalies: {report.get('num_anomalies', 0)}
+#   Overall Severity: {report.get('overall_severity', 'N/A')}
+
+# {'='*80}
+# REASONING TRACE:
+# {'='*80}
+# {report.get('reasoning_trace', 'No reasoning trace available')}
+
+# {'='*80}
+# IDENTIFIED EVENTS:
+# {'='*80}
+# """
+#         if report.get('identified_events'):
+#             for i, event in enumerate(report['identified_events'], 1):
+#                 summary += f"{i}. {event}\n"
+#         else:
+#             summary += "No events identified\n"
+        
+#         if report.get('anomalies'):
+#             summary += f"\n{'='*80}\nDETECTED ANOMALIES:\n{'='*80}\n"
+#             for anomaly in report['anomalies']:
+#                 summary += f"\n  [{anomaly.get('id', 'unknown')}]\n"
+#                 summary += f"    Type: {anomaly.get('type', 'unknown')}\n"
+#                 summary += f"    Severity: {anomaly.get('severity', 'unknown')}\n"
+#                 summary += f"    Description: {anomaly.get('description', 'N/A')}\n"
+        
+#         summary += f"\n{'='*80}\n"
+        
+#         if report.get('summary'):
+#             summary += f"\nSUMMARY: {report['summary']}\n"
+        
+#         return summary
     
     def analyze_video(
         self,
