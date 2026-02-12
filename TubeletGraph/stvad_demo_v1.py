@@ -162,22 +162,14 @@ class STVADFramework:
             if check:
                 sys.exit(1)
             return False, str(e)
+    
     def stage1_object_grounding(
         self,
         video_path: str,
         vlm_model: str = "gpt4v",
-        # target_fps: int = 10,
-        auto_mode: bool = True,
-        scan_frames: bool = True,       
-        threshold: float = 0.1          
+        target_fps: int = 10,
+        auto_mode: bool = True
     ) -> Tuple[str, str, bool]:
-    # def stage1_object_grounding(
-    #     self,
-    #     video_path: str,
-    #     vlm_model: str = "gpt4v",
-    #     target_fps: int = 10,
-    #     auto_mode: bool = True
-    # ) -> Tuple[str, str, bool]:
         """
         Stage 1: Object Grounding and Segmentation
         
@@ -198,27 +190,14 @@ class STVADFramework:
         
         video_name = Path(video_path).stem
         
-        # cmd = [
-        #     "python", self.vlm_mask_script,
-        #     "-i", video_path,
-        #     "--vlm", vlm_model,
-        #     "--frame", str(target_fps),
-        #     "--output_dir", self.output_dir
-        # ]
-        
-        # if auto_mode:
-        #     cmd.append("--auto")
-        # FIXED:
         cmd = [
             "python", self.vlm_mask_script,
             "-i", video_path,
-            "--output_dir", self.output_dir,
             "--vlm", vlm_model,
-            # "--auto",
-            "--scan_frames",          # scan multiple frames to detect occluded objects
-            "--threshold", "0.1"      # lower threshold for difficult/occluded objects
+            "--frame", str(target_fps),
+            "--output_dir", self.output_dir
         ]
-
+        
         if auto_mode:
             cmd.append("--auto")
         
@@ -295,49 +274,11 @@ class STVADFramework:
         video_name = Path(frames_dir).name
         # Prediction name format: custom-{video_name}-{method}_{vlm_model}
         # We'll need to parse config to get vlm model name, for now use generic
-        # prediction_name = f"custom-{video_name}-{method}"
-        prediction_name = self._resolve_prediction_name(video_name, method)
+        prediction_name = f"custom-{video_name}-{method}"
         
         self.log(f"Tracking results: {prediction_name}", "SUCCESS")
         
         return prediction_name, video_name, success
-    
-    def _resolve_prediction_name(self, video_name: str, method: str) -> str:
-        """
-        Resolve the actual prediction folder name produced by quick_run.py.
-        
-        quick_run.py names the output as: custom-{video}-{method}_{vlm_model_name}
-        We look in _pred_out/ for the matching folder with VLM suffix.
-        """
-        base_name = f"custom-{video_name}-{method}"
-        
-        # Search _pred_out/ for the actual folder with VLM suffix
-        pred_out_dir = osp.join(self.base_dir, "_pred_out")
-        if osp.isdir(pred_out_dir):
-            candidates = sorted([
-                d for d in os.listdir(pred_out_dir)
-                if d.startswith(base_name) and osp.isdir(osp.join(pred_out_dir, d))
-            ])
-            # Prefer the one with VLM suffix (e.g., custom-0000-Ours_gpt-4.1)
-            # which contains state_change_events, over the bare name
-            for c in candidates:
-                if c != base_name:  # has a VLM suffix
-                    self.log(f"Resolved prediction folder: {c}", "INFO")
-                    return c
-            if candidates:
-                return candidates[0]
-        
-        # Fallback: also try reading vlm model name from config
-        try:
-            from utils import load_yaml_file
-            cfg = load_yaml_file(self.config_path)
-            vlm_model_name = getattr(cfg.vlm, 'model_name', None)
-            if vlm_model_name:
-                return f"{base_name}_{vlm_model_name}"
-        except Exception:
-            pass
-        
-        return base_name
     
     def stage3_state_analysis(
         self,

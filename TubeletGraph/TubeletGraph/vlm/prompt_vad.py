@@ -576,52 +576,131 @@ def load_config(config_path: str) -> Dict:
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
-
 def load_prediction(prediction_dir: str, config: Dict) -> Dict:
     """
     Load TubeletGraph prediction results.
     
-    Expected structure:
-    {prediction_dir}/
-    ├── {video_name}_predictions.json
-    ├── predictions/
-    │   └── *.png masks
-    └── obj_info.json
+    Stage 2 outputs per-object JSONs like {video}_{obj_id}.json containing:
+      prediction, supix_masks, obj_info, state_change_events
     """
-    # Try multiple possible paths based on TubeletGraph output structure
-    possible_json_paths = [
-        osp.join(prediction_dir, "predictions.json"),
-        osp.join(prediction_dir, "obj_info.json"),
-        osp.join(prediction_dir, "result.json"),
-    ]
+    pred_data = {
+        "obj_info": {},
+        "state_changes": [],
+        "state_change_events": [],
+        "prediction": {},
+    }
     
-    # Also check config for output directory
-    outdir = config.get("output", {}).get("outdir", "output")
-    pred_name = Path(prediction_dir).name
-    possible_json_paths.extend([
-        osp.join(outdir, prediction_dir, "predictions.json"),
-        osp.join(outdir, pred_name, "predictions.json"),
-    ])
+    # Resolve prediction directory
+    if not osp.isdir(prediction_dir):
+        outdir = config.get("paths", {}).get("outdir",
+                 config.get("output", {}).get("outdir", "_pred_out"))
+        alt = osp.join(outdir, prediction_dir)
+        if osp.isdir(alt):
+            prediction_dir = alt
     
-    # Find the JSON file
-    pred_data = {}
-    for path in possible_json_paths:
-        if osp.isfile(path):
-            with open(path, 'r') as f:
-                pred_data = json.load(f)
-            logger.info(f"Loaded predictions from: {path}")
-            break
+    if not osp.isdir(prediction_dir):
+        logger.warning(f"Prediction directory not found: {prediction_dir}")
+        return pred_data
     
-    if not pred_data:
-        logger.warning(f"No prediction JSON found in {prediction_dir}")
-        # Create minimal structure
-        pred_data = {
-            "objects": [],
-            "frames": [],
-            "state_changes": []
-        }
+    # Glob all JSON files in the directory (e.g., 0000_1.json, 0000_2.json)
+    json_files = sorted(Path(prediction_dir).glob("*.json"))
+    
+    if not json_files:
+        logger.warning(f"No JSON files found in {prediction_dir}")
+        return pred_data
+    
+    for jf in json_files:
+        try:
+            with open(jf, 'r') as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"Failed to load {jf}: {e}")
+            continue
+        
+        # Merge obj_info
+        if "obj_info" in data and isinstance(data["obj_info"], dict):
+            pred_data["obj_info"].update(data["obj_info"])
+        
+        # Merge state_change_events
+        if "state_change_events" in data and isinstance(data["state_change_events"], list):
+            pred_data["state_change_events"].extend(data["state_change_events"])
+        
+        # Merge frame-by-frame prediction masks
+        if "prediction" in data and isinstance(data["prediction"], dict):
+            for frame_key, frame_masks in data["prediction"].items():
+                if frame_key not in pred_data["prediction"]:
+                    pred_data["prediction"][frame_key] = {}
+                pred_data["prediction"][frame_key].update(frame_masks)
+        
+        logger.info(f"Loaded: {jf.name}")
+    
+    # Convert state_change_events → state_changes list for analyze_state_changes()
+    for event in pred_data["state_change_events"]:
+        obj_idx = event.get("object_idx", "unknown")
+        obj_info = pred_data["obj_info"].get(obj_idx, {})
+        pred_data["state_changes"].append({
+            "obj_id": obj_idx,
+            "obj_name": obj_info.get("desc", "object"),
+            "start_frame": event.get("start_frame", 0),
+            "end_frame": event.get("end_frame", 0),
+            "change_type": event.get("change_type", "unknown"),
+            "description": event.get("description", ""),
+            "severity": event.get("severity", "slight"),
+        })
+    
+    n_obj = len(pred_data["obj_info"])
+    n_events = len(pred_data["state_change_events"])
+    logger.info(f"Aggregated {len(json_files)} files: {n_obj} objects, {n_events} state change events")
     
     return pred_data
+
+# def load_prediction(prediction_dir: str, config: Dict) -> Dict:
+#     """
+#     Load TubeletGraph prediction results.
+    
+#     Expected structure:
+#     {prediction_dir}/
+#     ├── {video_name}_predictions.json
+#     ├── predictions/
+#     │   └── *.png masks
+#     └── obj_info.json
+#     """
+#     # Try multiple possible paths based on TubeletGraph output structure
+#     possible_json_paths = [
+#         osp.join(prediction_dir, "predictions.json"),
+#         osp.join(prediction_dir, "obj_info.json"),
+#         osp.join(prediction_dir, "result.json"),
+#     ]
+    
+#     # Also check config for output directory
+#     # outdir = config.get("output", {}).get("outdir", "output")
+#     outdir = config.get("paths", {}).get("outdir",
+#          config.get("output", {}).get("outdir", "_pred_out"))
+#     pred_name = Path(prediction_dir).name
+#     possible_json_paths.extend([
+#         osp.join(outdir, prediction_dir, "predictions.json"),
+#         osp.join(outdir, pred_name, "predictions.json"),
+#     ])
+    
+#     # Find the JSON file
+#     pred_data = {}
+#     for path in possible_json_paths:
+#         if osp.isfile(path):
+#             with open(path, 'r') as f:
+#                 pred_data = json.load(f)
+#             logger.info(f"Loaded predictions from: {path}")
+#             break
+    
+#     if not pred_data:
+#         logger.warning(f"No prediction JSON found in {prediction_dir}")
+#         # Create minimal structure
+#         pred_data = {
+#             "objects": [],
+#             "frames": [],
+#             "state_changes": []
+#         }
+    
+#     return pred_data
 
 
 def extract_frames_from_video(video_path: str, sample_interval: int = 10) -> List[Tuple[int, Any]]:
@@ -1192,7 +1271,9 @@ def main():
     config = load_config(args.FILE)
     
     # Get output directory from config
-    outdir = config.get("output", {}).get("outdir", "output")
+    # outdir = config.get("output", {}).get("outdir", "output")
+    outdir = config.get("paths", {}).get("outdir",
+         config.get("output", {}).get("outdir", "_pred_out"))
     
     # Resolve prediction directory
     pred_dir = args.PRED

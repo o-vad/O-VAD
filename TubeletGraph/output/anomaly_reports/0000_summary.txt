@@ -7,8 +7,8 @@ Path: assets/example/PhysAD/0000.mp4
 ================================================================================
 
 DETECTION RESULT:
-  Anomaly Detected: NO ✅
-  Number of Anomalies: 0
+  Anomaly Detected: YES ❌
+  Number of Anomalies: 1
   Overall Severity: medium
 
 ================================================================================
@@ -20,5 +20,14 @@ REASONING TRACE:
 IDENTIFIED EVENTS:
 ================================================================================
 No events identified
+
+================================================================================
+DETECTED ANOMALIES:
+================================================================================
+
+  [anomaly_0000]
+    Type: deformation_anomaly/unexpected_deformation
+    Severity: medium
+    Description: The tube deformed significantly under pressure, which may indicate excessive force or material weakness.
 
 ================================================================================
