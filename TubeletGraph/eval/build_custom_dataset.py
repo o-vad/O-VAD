@@ -122,6 +122,9 @@ def create_custom_dataset(config_path, input_dir, input_mask, fps=None):
         input_mask_abs = osp.abspath(input_mask)
         if osp.exists(target_anno_file):
             os.remove(target_anno_file)
+        # os.symlink(input_mask_abs, target_anno_file)
+        if os.path.islink(target_anno_file) or os.path.exists(target_anno_file):
+            os.remove(target_anno_file)
         os.symlink(input_mask_abs, target_anno_file)
     else:
         print(f"Converting annotation to indexed PNG: {target_anno_file}")
