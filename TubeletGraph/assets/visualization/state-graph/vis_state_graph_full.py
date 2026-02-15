@@ -14,6 +14,8 @@ Usage:
     python vis_state_graph_full.py --json_files 0000_1.json 0000_2.json --output_dir ./vis_full
 """
 
+
+
 import json
 import os
 import os.path as osp
