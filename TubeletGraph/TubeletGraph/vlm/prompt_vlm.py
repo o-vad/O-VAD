@@ -168,7 +168,7 @@ Carefully check for ANY of these changes:
 - SIZE CHANGE: Has the object gotten bigger or smaller?
 - TEXTURE CHANGE: Has the surface appearance changed?
 
-Even subtle changes count! A tube being slightly squeezed or paste starting to come out are significant.
+Even subtle changes count!
 
 Answer format:
 STATE_CHANGED: [yes/no]
