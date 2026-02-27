@@ -218,7 +218,7 @@ def draw_mask_overlay(frame, mask, color_bgr, alpha=0.3):
     cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
 
 
-def draw_contours(frame, mask, color_bgr, thickness=2):
+def draw_contours(frame, mask, color_bgr, thickness=5):
     """Draw anti-aliased contours of the binary mask."""
     contours, _ = cv2.findContours(
         mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
@@ -228,7 +228,7 @@ def draw_contours(frame, mask, color_bgr, thickness=2):
     )
 
 
-def draw_label(frame, mask, text, color_bgr, font_scale=0.7, thickness=2):
+def draw_label(frame, mask, text, color_bgr, font_scale=1.5, thickness=3):
     """Draw a text label at the centroid of the mask."""
     ys, xs = np.where(mask > 0)
     if len(xs) == 0:
