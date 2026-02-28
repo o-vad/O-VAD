@@ -228,7 +228,7 @@ def draw_contours(frame, mask, color_bgr, thickness=5):
     )
 
 
-def draw_label(frame, mask, text, color_bgr, font_scale=1.5, thickness=3):
+def draw_label(frame, mask, text, color_bgr, font_scale=3, thickness=4):
     """Draw a text label at the centroid of the mask."""
     ys, xs = np.where(mask > 0)
     if len(xs) == 0:
@@ -278,9 +278,9 @@ def build_parser():
     p.add_argument("--colors", nargs="*", default=None,
                    help="Per-object colors as '#RRGGBB' or 'R,G,B'.  "
                         "Auto-assigned from a 20-color palette if omitted.")
-    p.add_argument("--thickness", type=int, default=2,
+    p.add_argument("--thickness", type=int, default=15,
                    help="Contour line thickness (default: 2).")
-    p.add_argument("--alpha", type=float, default=0.3,
+    p.add_argument("--alpha", type=float, default=0,
                    help="Mask fill opacity, 0 = contour only (default: 0.3).")
     p.add_argument("--show_labels", action="store_true",
                    help="Draw object id labels at mask centroids.")
