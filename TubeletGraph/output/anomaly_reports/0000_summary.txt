@@ -5,71 +5,83 @@ ST-VAD ANOMALY DETECTION REPORT
 Video: 0000
 Path: assets/example/PhysAD/0000.mp4
 Prediction: custom-0000-Ours_gpt-4.1
-Processing Time: 35.0s
+Processing Time: 34.4s
 ================================================================================
 
 DETECTION RESULT:
   Anomaly Detected: YES ❌
-  Number of Anomalies: 2
+  Number of Anomalies: 1
   Overall Severity: medium
 
 ================================================================================
 REASONING TRACE:
 ================================================================================
 
+  Step 0 - PROCESS_UNDERSTANDING:
+    Process/test: A controlled vertical press/compression (crush/squeeze) test of a flexible toothpaste tube (obj_id=1) using a rigid pressing fixture/tool (obj_id=3; machine head labeled "Backyard"). Purpose: quality/pack integrity testing—verify the tube and closure/nozzle can withstand applied compressive load without unintended product escape or package failure.
+
+Re-categorization of state changes:
+- expected_process (ACTIONS + mechanical responses): All deformation/compression events on obj_id=1 during tool contact are expected mechanical responses to the intentional pressing action (frames 30-40, 50-60, 60-70, 70-80, 80-90, 90-100, 120-130, 140-150, 150-160, 160-170). Tool motions/contact/retraction on obj_id=3 are expected process actions (30-40 upward shift; 50-60 contact; 60-70 downward; 70-80 compression; 150-160 compression; 160-170 compression; 170-179 retraction). Events logged under obj_id=2 appear to actually describe the press/tool interaction rather than a cap; treat them as process-action/mechanical-response duplicates, not anomalies.
+- potential_anomaly (OUTCOME): obj_id=1 material_release at frames 170-179 (white paste emerging from nozzle) is a process outcome indicating product release under test load.
+- noise: None clearly required beyond noting that several deformation events are repetitive/duplicative across objects (obj_id=2 vs obj_id=3) and some cause labels ("object_failure") are inconsistent with a press test; however the underlying visual change (deformation) is still expected.
+
   Step 1 - OBSERVATION:
-    The toothpaste tube (obj_id: 1) underwent multiple deformations from frames 30 to 170, with increasing severity. Initially, slight deformations were observed, progressing to moderate as the pressing tool applied more force. At frame 170, material release occurred, with white paste emerging from the tube. The cap (obj_id: 2) was detached and not involved in the deformation process.
+    Potential anomaly only:
+- obj_id=1 (Toothpaste tube, plastic, initially intact/unopened): material_release event from frame 170 to 179. Description: "white paste has started to emerge from the nozzle of the tube" (severity reported moderate, confidence 0.8). This release was not present earlier and appears after/around a pressing cycle (obj_id=3 shows contact/compression through 160-170 and retraction 170-179).
 
   Step 2 - EXPECTATION:
-    The task should involve controlled manipulation of the tube without causing damage or material release. The tube should maintain its integrity, with deformation limited to reversible changes without leakage.
+    Normal operation for a squeeze/crush test:
+- Expected actions/responses: the press tool descends, contacts the tube, and the tube elastically deforms (flattening, creasing, bulging) while under load; partial shape recovery can occur after tool retraction.
+- Pass criteria (outcome-focused): the tube package should maintain integrity under the specified load profile—no rupture/tearing, no seam failure, and no unintended product escape. If the cap/nozzle is supposed to be closed during the test, any paste extrusion indicates failure. If the nozzle is intentionally open, controlled extrusion could be acceptable; however the metadata says the tube is "unopened" and does not indicate an intentional dispensing step.
 
   Step 3 - COMPARISON:
-    Unexpected material release occurred at frames 170-179, deviating from the expectation of maintaining tube integrity. The deformation was more severe than anticipated, indicating excessive pressure.
+    Comparing potential anomaly vs pass criteria:
+- obj_id=1 material_release (frames 170-179): Paste emerging from the nozzle is an outcome, not a mere mechanical response. Under a packaging integrity test, this indicates loss of containment (failure) unless the test explicitly expects dispensing through an open nozzle.
+- Given obj_id=1 initial_state is "Intact, unopened" and there is no process step indicating intentional opening/dispensing, the observed material release is abnormal and consistent with a failed containment/closure condition exposed by the press.
 
   Step 4 - CAUSATION:
-    Possible causes include excessive force applied by the pressing tool, misalignment of the tool, or a defect in the tube material leading to premature failure.
+    Plausible root causes for obj_id=1 paste release at 170-179:
+- Closure/fit defect: cap missing/loose or nozzle seal compromised (even if a cap exists, it may not be installed or may be cross-threaded).
+- Overfill or trapped air increasing internal pressure under compression, forcing paste out through the nozzle.
+- Nozzle/check-seal design weakness: under compressive load, the path of least resistance is extrusion through the opening.
+- Process setup issue: tube placed with nozzle unsealed/open during a test intended for sealed units (test configuration error).
 
   Step 5 - CLASSIFICATION:
-    material_anomaly (unexpected leakage), deformation_anomaly (excessive deformation leading to leakage)
+    Confirmed anomaly:
+- material_anomaly: product leakage/dispensing under compression (loss of containment) from obj_id=1 at frames 170-179.
+No other confirmed anomalies: all deformation and tool motion events are expected process behavior for a press test.
 
   Step 6 - SEVERITY:
-    Severity is rated as medium due to the impact on task completion and potential quality issues from the leakage. The issue is partially reversible but indicates a need for process adjustment.
+    Severity: medium. Justification: The test outcome indicates the unit likely fails containment/closure requirements (quality failure) but does not show catastrophic rupture or safety-critical breakage in the provided frames. Impact is significant for product quality (leak/dispense), likely requiring rejection, but is localized and reversible only by replacing/reworking the unit.
 
 ================================================================================
 IDENTIFIED EVENTS:
 ================================================================================
-  1. The toothpaste tube (obj_id: 1) underwent multiple deformations from frames 30 to 170, with increasing severity
-  2. Initially, slight deformations were observed, progressing to moderate as the pressing tool applied more force
-  3. At frame 170, material release occurred, with white paste emerging from the tube
-  4. The cap (obj_id: 2) was detached and not involved in the deformation process
+  1. Potential anomaly only:
+  2. - obj_id=1 (Toothpaste tube, plastic, initially intact/unopened): material_release event from frame 170 to 179
+  3. Description: "white paste has started to emerge from the nozzle of the tube" (severity reported moderate, confidence 0
+  4. 8)
+  5. This release was not present earlier and appears after/around a pressing cycle (obj_id=3 shows contact/compression through 160-170 and retraction 170-179)
 
 ================================================================================
 DETECTED ANOMALIES:
 ================================================================================
 
   [anomaly_0000]
-    Type: material_anomaly / unexpected leakage
+    Type: material_anomaly / loss_of_containment / paste_extrusion_from_nozzle_under_compression
     Severity: medium
-    Confidence: 0.88
-    Description: White paste leaked from the tube at frames 170-179, indicating a failure to maintain tube integrity under pressure.
+    Confidence: 0.82
+    Description: obj_id=1 (toothpaste tube) releases white paste from the nozzle during/after the press cycle (state change: material_release, frames 170-179). In a squeeze/crush integrity test of an initially intact/unopened tube, material release indicates failure of containment (cap/nozzle seal issue, overpressure, or setup with an unsealed opening).
     Affected Objects: 1
     Evidence Frames: [170, 179]
-
-  [anomaly_0001]
-    Type: deformation_anomaly / excessive deformation
-    Severity: medium
-    Confidence: 0.85
-    Description: The tube experienced excessive deformation from frames 30 to 170, leading to material release.
-    Affected Objects: 1
-    Evidence Frames: [30, 170]
 
 ================================================================================
 
 SUMMARY:
-  The manipulation task resulted in unexpected material release from the toothpaste tube due to excessive deformation. The pressing tool applied more force than necessary, leading to leakage at frames 170-179. This indicates a need for process adjustments to prevent future occurrences.
+  The video depicts a controlled press/compression (crush) test where a rigid tool (obj_id=3) repeatedly descends onto a flexible toothpaste tube (obj_id=1), producing expected deformation/creasing during frames 30-170. The only failure-type outcome is a material release event on obj_id=1 at frames 170-179, where white paste emerges from the nozzle—indicating loss of containment/closure integrity (or incorrect test setup with an unsealed nozzle). All other logged deformations and tool motions are normal process behavior for this test.
 
 ================================================================================
-STATE CHANGES (22 tracked):
+STATE CHANGES (29 tracked):
 ================================================================================
   [Toothpaste tube (Darlie brand)] Frames 30-40: deformation (slight)
   [Toothpaste tube (Darlie brand)] Frames 50-60: deformation (slight)
@@ -81,6 +93,6 @@ STATE CHANGES (22 tracked):
   [Toothpaste tube (Darlie brand)] Frames 140-150: deformation (slight)
   [Toothpaste tube (Darlie brand)] Frames 150-160: deformation (moderate)
   [Toothpaste tube (Darlie brand)] Frames 160-170: deformation (moderate)
-  ... and 12 more
+  ... and 19 more
 
 ================================================================================

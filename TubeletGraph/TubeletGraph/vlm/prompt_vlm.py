@@ -11,6 +11,8 @@ Key changes from original:
 - Added state change detection even when no new objects appear
 - Enhanced prompts for gripper/robot manipulation scenarios
 - Better handling of subtle transformations like toothpaste leaking
+- Open-ended CHANGE_TYPE and CHANGE_CAUSE labels (not restricted to fixed taxonomy)
+- Mask IoU / area pre-check to skip tracking noise and save VLM calls
 
 """
 
@@ -112,11 +114,11 @@ def get_system_prompt():
 
 Your tasks include:
 1. Identifying objects and their current states
-2. Detecting ANY change in object appearance, shape, or material state
+2. Detecting OBVIOUS change in object appearance, shape, material or moving state (slight changes should be ignored)
 3. Recognizing interactions between objects (e.g. gripping, pressing, squeezing)
-4. Noticing subtle dynamics like material flow, deformation, or leaking
+4. Check if there is dynamics like material flow, deformation, or leaking
 
-Be thorough and observant. Even small, subtle changes are important to report.
+Focus on OBVIOUS MAIN changes. If there is no changes or only normal slight changes, ignore them.
 Pay special attention to specific state changes, for example:
 - Deformable objects (tubes, bags, soft materials)
 - Material release (liquids, pastes, powders coming out)
@@ -128,6 +130,7 @@ Pay special attention to specific state changes, for example:
 def get_enhanced_message_prompts(init_c_name, query_c_name):
     """
     Enhanced prompts that capture state changes, not just new objects.
+    CHANGE_TYPE and CHANGE_CAUSE are open-ended (free-form) with examples as guidance.
     """
     
     # Object identification
@@ -154,27 +157,65 @@ Consider: motion blur, occlusion, cropping at edges.
 Answer: yes or no"""),
     ]
     
-    # State change detection (NEW - this is the key addition)
+    # State change detection — WITH OPEN-ENDED CAUSE CATEGORIZATION
     prompt_messages_state_change = [
         ('text', f"""Compare these two frames from a video. The same object is highlighted with {init_c_name} contour in both.
 
 First image: Earlier frame
 Second image: Later frame
 
-Carefully check for ANY of these changes:
-- DEFORMATION: Is the object's shape different? (compressed, bent, stretched)
-- MATERIAL RELEASE: Is anything coming out of the object? (liquid, paste, contents)
-- SURFACE CHANGE: Any cracks, tears, openings, damage?
-- SIZE CHANGE: Has the object gotten bigger or smaller?
-- TEXTURE CHANGE: Has the surface appearance changed?
+Carefully check for OBVIOUS changes (normal slight changes should be ignored):
+- Shape: Is the object's shape different? (compressed, bent, stretched, etc.)
+- Material: Is anything coming out of the object? (liquid, paste, gas, etc.)
+- Surface: Any cracks, tears, openings, damage, texture change?
+- Motion/Position: Has the object moved, rotated, or shifted unexpectedly?
+- Function: Has the object's functional state changed? (stuck, loose, detached, etc.)
 
-Even subtle changes count!
+If a change is detected, you MUST also determine its CAUSE. Distinguish between 
+process ACTIONS and process OUTCOMES:
+
+- Process actions and mechanical responses (the machine/tool acting on the object, 
+  and the object's direct physical response): deformation from pressing, compression 
+  from gripping, movement from transport. Label these as what they are, e.g.:
+  "process_action_pressing", "mechanical_response_deformation", "tool_contact", 
+  "transport_vibration", etc.
+
+- Process outcomes (results that reveal whether the object passed or failed): 
+  material release/leaking, cracking, breaking, getting stuck, loss of function. 
+  These are potential defects even if triggered by an intentional action. Label 
+  these as what they are, e.g.:
+  "object_failure_leakage", "structural_failure_crack", "mechanism_stuck", 
+  "seal_failure", etc.
+
+- Environmental/noise: lighting change, camera movement, background variation. 
+  Label as e.g. "environmental_lighting", "camera_movement", etc.
+
+Use your own descriptive label — the examples above are just guidance. The label 
+should clearly indicate whether the cause is a process action/mechanical response, 
+an object/process failure outcome, or environmental noise.
+IMPORTANT: Do NOT leave CHANGE_CAUSE blank or say "uncertain". Always commit to 
+your best judgment.
 
 Answer format:
 STATE_CHANGED: [yes/no]
-CHANGE_TYPE: [deformation/material_release/surface_change/size_change/none]
+CHANGE_TYPE: [your description of what type of change occurred — free-form]
+CHANGE_CAUSE: [REQUIRED — your descriptive label for the cause. Never say "uncertain".]
 CHANGE_DESCRIPTION: [describe what changed in detail]
-CHANGE_SEVERITY: [none/slight/moderate/severe]"""),
+CHANGE_SEVERITY: [none/slight/moderate/severe]
+
+Example 1 — A tube being compressed by a press:
+STATE_CHANGED: yes
+CHANGE_TYPE: compression_deformation
+CHANGE_CAUSE: process_action_pressing — external press tool applying downward force
+CHANGE_DESCRIPTION: The tube is flattened under the pressing tool, with sides bulging.
+CHANGE_SEVERITY: moderate
+
+Example 2 — Paste emerging from a tube's nozzle:
+STATE_CHANGED: yes
+CHANGE_TYPE: material_release
+CHANGE_CAUSE: object_failure_leakage — material escaping from the object under pressure
+CHANGE_DESCRIPTION: White paste has emerged from the nozzle, not present in earlier frame.
+CHANGE_SEVERITY: moderate"""),
     ]
     
     # Interaction detection between objects
@@ -255,7 +296,7 @@ def get_masked_image(image, mask, color_rgb, mask_alpha=0.0, contour_thickness=3
 
 
 def format_output(s):
-    return s.replace('\n', '').replace('\"', '"').replace('\'', '"').replace('â€œ', '"').replace('â€', '"')
+    return s.replace('\n', '').replace('\"', '"').replace('\'', '"').replace('\u201c', '"').replace('\u201d', '"')
 
 
 def yes_no_cleanup(response):
@@ -274,6 +315,30 @@ def rle_wrapper(rle):
         'counts': rle['counts'].decode('ascii') if isinstance(rle['counts'], bytes) else rle['counts'],
         'size': rle['size']
     }
+
+
+# =============================================================================
+# Mask Geometry Utilities (for pre-filtering tracking noise)
+# =============================================================================
+
+def compute_mask_iou(mask1, mask2):
+    """Compute IoU between two RLE masks to detect tracking noise vs real change."""
+    if isinstance(mask1, dict) and isinstance(mask2, dict):
+        intersection = MaskUtils.area(MaskUtils.merge([mask1, mask2], intersect=1))
+        union = MaskUtils.area(MaskUtils.merge([mask1, mask2], intersect=0))
+        if union == 0:
+            return 1.0
+        return intersection / union
+    return 0.0
+
+
+def compute_mask_area_ratio(mask1, mask2):
+    """Compute area ratio between two masks to detect large contour jumps (tracking artifacts)."""
+    area1 = MaskUtils.area(mask1) if isinstance(mask1, dict) else 0
+    area2 = MaskUtils.area(mask2) if isinstance(mask2, dict) else 0
+    if area1 == 0 or area2 == 0:
+        return 0.0
+    return min(area1, area2) / max(area1, area2)
 
 
 # =============================================================================
@@ -310,6 +375,9 @@ def detect_state_changes(
     - Toothpaste tube being squeezed
     - Material leaking out
     - Deformation from gripper pressure
+    
+    Includes mask IoU/area pre-checks to skip frames with tracking noise or
+    negligible change, saving VLM API calls.
     
     Args:
         client: OpenAI client
@@ -359,6 +427,23 @@ def detect_state_changes(
         if mask_before is None or mask_after is None:
             continue
         
+        # === Mask geometry pre-check: skip noise and negligible changes ===
+        iou = compute_mask_iou(mask_before, mask_after)
+        area_ratio = compute_mask_area_ratio(mask_before, mask_after)
+        
+        # Very high IoU → mask barely changed, skip VLM call
+        if iou > 0.95:
+            print(f"    Skipping frames {frame_idx_before}-{frame_idx_after}: "
+                  f"mask nearly identical (IoU={iou:.3f})")
+            continue
+        
+        # Very low area ratio → likely tracking failure / artifact, not real change
+        if area_ratio < 0.3:
+            print(f"    Skipping frames {frame_idx_before}-{frame_idx_after}: "
+                  f"likely tracking artifact (area_ratio={area_ratio:.2f})")
+            continue
+        # === End pre-check ===
+        
         # Load frames
         img_before = imageio.imread(frame_paths[frame_idx_before])
         img_after = imageio.imread(frame_paths[frame_idx_after])
@@ -385,9 +470,10 @@ def detect_state_changes(
             )
             rsp = get_model_response(response, html_writer=html_writer)
             
-            # Parse response
+            # Parse response (all fields are free-form)
             state_changed = False
             change_type = 'none'
+            change_cause = 'uncertain'
             change_desc = ''
             severity = 'none'
             
@@ -397,6 +483,8 @@ def detect_state_changes(
                     state_changed = 'yes' in line.lower()
                 elif line.startswith('CHANGE_TYPE:'):
                     change_type = line.split(':', 1)[1].strip()
+                elif line.startswith('CHANGE_CAUSE:'):
+                    change_cause = line.split(':', 1)[1].strip()
                 elif line.startswith('CHANGE_DESCRIPTION:'):
                     change_desc = line.split(':', 1)[1].strip()
                 elif line.startswith('CHANGE_SEVERITY:'):
@@ -407,11 +495,13 @@ def detect_state_changes(
                     'start_frame': frame_idx_before,
                     'end_frame': frame_idx_after,
                     'change_type': change_type,
+                    'change_cause': change_cause,
                     'description': change_desc,
                     'severity': severity,
                     'object_idx': obj_idx
                 })
-                print(f"    State change detected: frames {frame_idx_before}-{frame_idx_after}: {change_desc}")
+                print(f"    State change detected: frames {frame_idx_before}-{frame_idx_after}: "
+                      f"[{change_type}] ({change_cause}) {change_desc}")
         
         except Exception as e:
             print(f"    Warning: VLM query failed: {e}")
@@ -772,6 +862,3 @@ if __name__ == "__main__":
         print(f"Saved: {new_pred_path}")
         print(f"  Objects: {list(obj_info.keys())}")
         print(f"  State changes: {len(state_change_events)}")
-
-
-        

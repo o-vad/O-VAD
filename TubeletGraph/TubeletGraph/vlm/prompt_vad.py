@@ -6,13 +6,20 @@ This script performs Stage 3 & 4 of the ST-VAD pipeline:
 - Stage 3: State change analysis and temporal pattern detection
 - Stage 4: Chain-of-thought anomaly reasoning and classification
 
-The reasoning chain follows 6 steps:
+The reasoning chain follows 7 steps (Step 0–6):
+0. Process Understanding: What is the process doing? Which changes are expected?
 1. Observation: What changes/events occurred?
 2. Expectation: What should have happened?
 3. Comparison: How do observations differ from expectations?
 4. Causation: What could cause these deviations?
 5. Classification: What type of anomaly is this?
 6. Severity: How serious is the anomaly?
+
+Key design changes (v2):
+- Step 0 separates process-induced changes (normal) from object/process failures (anomalies)
+- CHANGE_TYPE and CHANGE_CAUSE from Stage 2 are free-form — no fixed taxonomy
+- Noise pre-filtering before the reasoning chain (keyword-based on free-form cause labels)
+- Process-aware system prompt, task context, and visual verification
 
 Usage:
     python prompt_vad.py -c configs/default.yaml -p custom-0000-Ours \\
@@ -88,69 +95,12 @@ logger = logging.getLogger(__name__)
 # DATA CLASSES AND ENUMS
 # =============================================================================
 
-class AnomalyType(str, Enum):
-    MANIPULATION_FAILURE = "manipulation_failure"
-    MATERIAL_ANOMALY = "material_anomaly"
-    DEFORMATION_ANOMALY = "deformation_anomaly"
-    PROCESS_ANOMALY = "process_anomaly"
-    ENVIRONMENTAL_ANOMALY = "environmental_anomaly"
-    UNKNOWN = "unknown"
-
-
 class AnomalySeverity(str, Enum):
     NONE = "none"
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
-
-
-ANOMALY_TAXONOMY = {
-    "manipulation_failure": {
-        "description": "Failures in the manipulation/grasping process",
-        "subtypes": {
-            "grip_slip": "Object slips from grasp during manipulation",
-            "incomplete_grasp": "Object not fully grasped or secured",
-            "excessive_force": "Too much force applied causing damage",
-            "misalignment": "Object/tool misaligned with target"
-        }
-    },
-    "material_anomaly": {
-        "description": "Anomalies in material behavior or properties",
-        "subtypes": {
-            "unexpected_leakage": "Material leaking when it shouldn't",
-            "no_dispensing": "Expected material not dispensed",
-            "contamination": "Foreign material present",
-            "wrong_material": "Incorrect material type/properties"
-        }
-    },
-    "deformation_anomaly": {
-        "description": "Unexpected deformation behaviors",
-        "subtypes": {
-            "unexpected_deformation": "Deformation that shouldn't occur",
-            "insufficient_deformation": "Less deformation than expected",
-            "structural_damage": "Permanent damage (cracks, breaks)",
-            "recovery_failure": "Elastic material fails to recover"
-        }
-    },
-    "process_anomaly": {
-        "description": "Anomalies in the process sequence or timing",
-        "subtypes": {
-            "sequence_error": "Wrong order of operations",
-            "timing_anomaly": "Operation too fast/slow",
-            "missing_step": "Required step not performed",
-            "extra_operation": "Unexpected additional operation"
-        }
-    },
-    "environmental_anomaly": {
-        "description": "Environmental factors affecting the process",
-        "subtypes": {
-            "obstruction": "Object blocking the process",
-            "position_drift": "Objects shifted from expected position",
-            "lighting_change": "Lighting affecting visibility/sensors"
-        }
-    }
-}
 
 
 @dataclass
@@ -160,10 +110,11 @@ class StateChange:
     obj_name: str
     start_frame: int
     end_frame: int
-    change_type: str  # deformation, material_release, surface_change, etc.
+    change_type: str  # Free-form from Stage 2 (e.g., deformation, material_release, rotational_resistance, ...)
     description: str
     severity: str = "slight"  # none, slight, moderate, severe
     confidence: float = 0.8
+    change_cause: str = "uncertain"  # Free-form from Stage 2 (e.g., process_action, object_failure, ...)
 
 
 @dataclass
@@ -208,6 +159,7 @@ class AnomalyReport:
     summary: str
     timestamp: str
     processing_time: float
+    caption: str
 
 
 # =============================================================================
@@ -241,7 +193,6 @@ class ClaudeClient(VLMClient):
     def _encode_image(self, image: Any) -> Dict:
         """Encode image for Claude API."""
         if isinstance(image, str):
-            # File path or base64
             if osp.isfile(image):
                 with open(image, "rb") as f:
                     data = base64.b64encode(f.read()).decode("utf-8")
@@ -251,7 +202,6 @@ class ClaudeClient(VLMClient):
                 data = image
                 media_type = "image/jpeg"
         elif HAS_NUMPY and isinstance(image, np.ndarray):
-            # NumPy array
             success, buffer = cv2.imencode('.jpg', image)
             if success:
                 data = base64.b64encode(buffer).decode("utf-8")
@@ -298,9 +248,9 @@ class ClaudeClient(VLMClient):
 
 
 class OpenAIClient(VLMClient):
-    """OpenAI GPT-4V client."""
+    """OpenAI GPT-5 client using the new Responses API."""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-5"):
         if not HAS_OPENAI:
             raise ImportError("openai package not installed")
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
@@ -308,13 +258,13 @@ class OpenAIClient(VLMClient):
         self.client = openai.OpenAI(api_key=self.api_key)
     
     def _encode_image(self, image: Any) -> Dict:
-        """Encode image for OpenAI API."""
+        """Encode image for the OpenAI Responses API."""
         if isinstance(image, str):
             if osp.isfile(image):
                 with open(image, "rb") as f:
                     data = base64.b64encode(f.read()).decode("utf-8")
                 ext = Path(image).suffix.lower()
-                media_type = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}.get(ext[1:], "image/jpeg")
+                media_type = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(ext[1:], "image/jpeg")
             else:
                 data = image
                 media_type = "image/jpeg"
@@ -328,11 +278,10 @@ class OpenAIClient(VLMClient):
         else:
             raise ValueError(f"Unsupported image type: {type(image)}")
         
+        # New Responses API image schema
         return {
-            "type": "image_url",
-            "image_url": {
-                "url": f"data:{media_type};base64,{data}"
-            }
+            "type": "input_image",
+            "image_url": f"data:{media_type};base64,{data}"
         }
     
     def query(
@@ -345,25 +294,34 @@ class OpenAIClient(VLMClient):
     ) -> str:
         content = []
         
+        # Append images if present
         if images:
             for img in images:
                 content.append(self._encode_image(img))
         
-        content.append({"type": "text", "text": prompt})
+        # New Responses API text schema
+        content.append({"type": "input_text", "text": prompt})
         
-        messages = []
+        # Structure the payload using 'input' instead of 'messages'
+        input_data = [{"role": "user", "content": content}]
+        
+        # Build keyword arguments for the Responses API
+        kwargs = {
+            "model": self.model,
+            "input": input_data,
+            "max_output_tokens": max_tokens,
+            "temperature": temperature
+        }
+        
+        # System prompts map nicely to the new 'instructions' parameter
         if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": content})
+            kwargs["instructions"] = system_prompt
+            
+        # Execute using the Responses API endpoint
+        response = self.client.responses.create(**kwargs)
         
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature
-        )
-        
-        return response.choices[0].message.content
+        # Simplified response extraction
+        return response.output_text
 
 
 class OllamaClient(VLMClient):
@@ -425,7 +383,7 @@ def create_vlm_client(provider: str, api_key: Optional[str] = None, model: Optio
     if provider in ["claude", "anthropic"]:
         return ClaudeClient(api_key=api_key, model=model or "claude-sonnet-4-20250514")
     elif provider in ["openai", "gpt4v", "gpt-4v", "gpt4o", "gpt-4o"]:
-        return OpenAIClient(api_key=api_key, model=model or "gpt-4o")
+        return OpenAIClient(api_key=api_key, model=model or "gpt-5.2")
     elif provider in ["ollama", "llava"]:
         return OllamaClient(model=model or "llava")
     else:
@@ -438,28 +396,27 @@ def create_vlm_client(provider: str, api_key: Optional[str] = None, model: Optio
 
 SYSTEM_PROMPT_ANOMALY = """You are an expert anomaly detection system for industrial processes.
 You have access to object tracking data including object metadata (descriptions, materials, 
-initial states) and fine-grained state change events detected across video frames.
+initial states), video caption, and fine-grained state change events detected across video frames.
+
+CRITICAL PRINCIPLE — separate process ACTIONS from process OUTCOMES:
+In industrial testing and manufacturing, the process intentionally applies forces, movements, 
+and stresses to objects. These process ACTIONS (pressing, rotating, transporting, gripping) 
+and their direct MECHANICAL RESPONSES (elastic deformation, positional movement, compression) 
+are NORMAL, not anomalies.
+
+However, the OUTCOMES that result from these actions can reveal object defects or failures. 
+Material release (leaking, dispensing), structural damage (cracking, breaking), functional 
+failure (getting stuck, losing elasticity), and similar outcomes are POTENTIAL ANOMALIES — 
+even when triggered by an intentional test action. The whole point of industrial testing is 
+to expose such failures.
+
 
 Your role is to:
-1. Carefully study the tracked object metadata and state change events provided
-2. Observe object states and changes grounded in this tracking data
-3. Compare observations against expected normal behaviors for these specific materials/objects
-4. Identify deviations that indicate anomalies or failures
-5. Freely classify anomalies based on your broad domain knowledge
-6. Provide clear step-by-step reasoning grounded in the evidence from tracking
-
-Be thorough but avoid false positives. Consider physical plausibility and context.
-Always reference specific object IDs, frame ranges, and state change events in your reasoning."""
-
-# SYSTEM_PROMPT_ANOMALY = """You are an expert anomaly detection system for industrial processes.
-# Your role is to:
-# 1. Carefully observe object states and changes over time
-# 2. Compare observations against expected normal behaviors
-# 3. Identify deviations that indicate anomalies or failures
-# 4. Classify anomalies by type and severity
-# 5. Provide clear step-by-step reasoning for your assessments
-
-# Be thorough but avoid false positives. Consider physical plausibility and context."""
+1. First understand what the process/test is doing (ACTIONS) and what it's testing for (OUTCOMES)
+2. Classify mechanical responses (deformation, movement) as expected process behavior
+3. Classify material release, structural failure, functional failure as potential anomalies
+4. Only dismiss a potential anomaly if you have strong evidence it is truly benign
+5. Always reference specific object IDs, frame ranges, and state change events"""
 
 
 PROMPT_STATE_ANALYSIS = """Analyze the state changes detected in this manipulation video.
@@ -490,80 +447,29 @@ Output as JSON:
 }}"""
 
 
-# PROMPT_ANOMALY_REASONING = """You are analyzing video of a manipulation task for anomalies.
+PROMPT_ANOMALY_REASONING = """You are analyzing video of an industrial process for anomalies.
+Anomalies are real flaws, failures, or defects — NOT normal process behaviors.
 
-# TASK CONTEXT:
-# {task_context}
+CRITICAL DISTINCTION — separate process ACTIONS from process OUTCOMES:
+- Process ACTIONS are what the test/machine does to the object: pressing, squeezing, 
+  rotating, transporting, gripping. These actions are always NORMAL.
+- Process-induced MECHANICAL RESPONSES are direct physical consequences of those actions 
+  that do not indicate failure: elastic deformation under load, positional movement during 
+  transport, compression while gripped. These are EXPECTED and NOT anomalies.
+- Process OUTCOMES are what happens to the object AS A RESULT of the test — these reveal 
+  whether the object PASSED or FAILED the test. Material release (leaking, dispensing), 
+  structural failure (cracking, breaking), functional failure (getting stuck, losing 
+  elasticity), and similar outcomes are POTENTIAL ANOMALIES even if the process action 
+  that triggered them was intentional. The purpose of a test is to expose such failures.
+- Slight contour/shape variations between frames can be tracking noise — ignore these.
 
-# TRACKED OBJECTS:
-# {object_info}
 
-# STATE CHANGES DETECTED:
-# {state_changes}
-
-# Follow this 6-step reasoning chain:
-
-# STEP 1 - OBSERVATION:
-# What specific changes and events occurred? List the facts observed.
-
-# STEP 2 - EXPECTATION:
-# Given the task, what should have happened? What is normal behavior for this process?
-
-# STEP 3 - COMPARISON:
-# How do observations differ from expectations? What specific deviations exist?
-
-# STEP 4 - CAUSATION:
-# What could cause these deviations? Consider:
-# - Equipment issues (gripper, tool, sensor malfunction)
-# - Material issues (defect, wrong material, contamination)
-# - Process issues (wrong sequence, timing, parameters)
-# - Environmental issues (obstruction, lighting, position)
-
-# STEP 5 - CLASSIFICATION:
-# Classify any anomalies found into these categories:
-# - manipulation_failure: grip_slip, incomplete_grasp, excessive_force, misalignment
-# - material_anomaly: unexpected_leakage, no_dispensing, contamination, wrong_material
-# - deformation_anomaly: unexpected_deformation, insufficient_deformation, structural_damage, recovery_failure
-# - process_anomaly: sequence_error, timing_anomaly, missing_step, extra_operation
-# - environmental_anomaly: obstruction, position_drift, lighting_change
-
-# STEP 6 - SEVERITY ASSESSMENT:
-# Rate severity (none/low/medium/high/critical) based on:
-# - Impact on task completion
-# - Safety implications
-# - Quality implications
-# - Reversibility of the issue
-
-# Output your analysis as JSON:
-# {{
-#   "reasoning": {{
-#     "step1_observation": "detailed observations...",
-#     "step2_expectation": "expected normal behavior...",
-#     "step3_comparison": "deviations found...",
-#     "step4_causation": "possible causes...",
-#     "step5_classification": "anomaly classifications...",
-#     "step6_severity": "severity assessment..."
-#   }},
-#   "anomalies": [
-#     {{
-#       "anomaly_type": "type from taxonomy",
-#       "anomaly_subtype": "subtype from taxonomy",
-#       "severity": "none/low/medium/high/critical",
-#       "description": "detailed description",
-#       "affected_objects": ["obj_ids"],
-#       "evidence_frames": [frame_numbers],
-#       "confidence": 0.0-1.0
-#     }}
-#   ],
-#   "is_anomalous": true/false,
-#   "overall_severity": "none/low/medium/high/critical",
-#   "summary": "one paragraph summary of findings"
-# }}"""
-
-PROMPT_ANOMALY_REASONING = """You are analyzing video of a manipulation task for anomalies.
 
 TASK CONTEXT:
 {task_context}
+
+VIDEO CAPTION (from video sampled frames):
+{caption}
 
 TRACKED OBJECTS (from automatic detection and tracking):
 {object_info}
@@ -571,42 +477,97 @@ TRACKED OBJECTS (from automatic detection and tracking):
 STATE CHANGES DETECTED (from object-centric state tracking):
 {state_changes}
 
-Follow this 6-step reasoning chain. Ground every step in the tracked object 
-metadata and state change events provided above.
+Follow this 7-step reasoning chain (Step 0–6). Ground every step in the video caption, 
+tracked object metadata and state change events provided above.
+
+STEP 0 - PROCESS UNDERSTANDING:
+What is the industrial process or test being performed in this video? What is its 
+PURPOSE? (e.g., quality testing, assembly, packaging, transport, inspection)
+
+Examine each state change event and its reported CHANGE_TYPE and CHANGE_CAUSE 
+(these are free-form descriptions from Stage 2 tracking). Separate process ACTIONS 
+from process OUTCOMES using your own judgment:
+
+A) Identify the process ACTIONS (what the machine/tool does to the object):
+   e.g., pressing, rotating, transporting, gripping — these are always expected.
+
+B) Identify MECHANICAL RESPONSES (direct physical consequences of actions that 
+   do NOT indicate failure):
+   e.g., elastic deformation under load, positional shift during transport, 
+   compression while gripped — categorize these as "expected_process".
+
+C) Identify process OUTCOMES (results that reveal whether the object passed or 
+   failed the test):
+   e.g., material release/leakage, cracking, breaking, getting stuck, loss of 
+   function — categorize these as "potential_anomaly" EVEN IF the process action 
+   that triggered them was intentional. The whole point of a test is to expose 
+   such failures.
+
+D) Identify tracking artifacts:
+   e.g., minor contour shifts, lighting changes — categorize as "noise".
+
+Re-categorize each state change event as one of:
+  - "expected_process": Process actions and their direct mechanical responses 
+    (deformation from pressing, movement from transport, compression from gripping)
+  - "potential_anomaly": Process outcomes that indicate object failure or defect 
+    (structural damage, functional failure, stuck mechanisms) — 
+    even if triggered by an intentional process action
+  - "noise": Minor variations from tracking, lighting, or camera (ignore these)
+
+Note: Stage 2 may have already labeled causes — use those as input but apply your own 
+reasoning. A change labeled "process_action" by Stage 2 may still produce OUTCOMES 
+that are potential anomalies.
 
 STEP 1 - OBSERVATION:
 What specific changes and events occurred? Reference the tracked objects by 
 their IDs and descriptions. Cite the frame ranges and state change types from 
 the tracking data. Note each object's material, initial state, and how it evolved.
+ONLY focus on state changes categorized as "potential_anomaly" in Step 0.
 
 STEP 2 - EXPECTATION:
-Given the task context and the objects' materials/properties, what should have 
-happened? What constitutes normal behavior for these specific objects and this 
-process? Consider physical plausibility given the materials involved.
+Given the identified process and the objects' materials/properties, what SHOULD 
+happen during this process? What does normal operation look like?
+- Process ACTIONS and MECHANICAL RESPONSES that are expected (not anomalies):
+  Objects under test WILL deform, move, or change shape when force is applied.
+  Transport systems WILL vibrate slightly. Grippers WILL compress objects.
+- Process OUTCOMES that indicate the object PASSED the test:
+  A tube under pressure should withstand it WITHOUT leaking from seams or body.
+  A mechanism under load should operate WITHOUT getting stuck.
+  A component should maintain structural integrity WITHOUT cracking.
+If an object exhibits material release, structural failure, or functional breakdown 
+as a RESULT of the test, this means the object FAILED — that is an anomaly.
 
 STEP 3 - COMPARISON:
-How do the observed state changes differ from expectations? Be specific:
-which object, which frames, what change was unexpected and why?
+Compare the "potential_anomaly" state changes from Step 0 against the expected 
+PASS criteria from Step 2. For each potential anomaly:
+- Does this outcome indicate the object FAILED the test?
+- Is this a mechanical response (expected) or a failure outcome (anomaly)?
+- Be specific: which object, which frames, what happened, and why it's abnormal.
+Ignore all changes categorized as "expected_process" or "noise" in Step 0.
 
 STEP 4 - CAUSATION:
-What could cause these deviations? Reason freely — consider equipment issues, 
-material defects, process errors, environmental factors, or any other plausible 
-cause. Do NOT limit yourself to predefined categories.
+For the remaining deviations, reason about root causes. Consider equipment issues, 
+material defects, process errors, environmental factors, or any other plausible cause.
+Do NOT limit yourself to predefined categories.
 
 STEP 5 - CLASSIFICATION:
-Classify any anomalies you found using your own judgment. You are free to name 
-the anomaly type and subtype based on what you observe — there is no fixed taxonomy.
-For reference, here are some EXAMPLES of anomaly types seen in industrial settings, 
-but you should create your own labels if none of these fit:
-  - manipulation_failure (e.g., grip slip, misalignment)
-  - material_anomaly (e.g., unexpected leakage, contamination)
-  - deformation_anomaly (e.g., structural damage, recovery failure)
-  - process_anomaly (e.g., wrong sequence, missing step)
-  - environmental_anomaly (e.g., obstruction, position drift)
+Classify any CONFIRMED anomalies using your own judgment. You are free to name 
+the anomaly type and subtype. The anomalies must be:
+  - Real object failures (leaking, breaking, getting stuck, losing function)
+  - Real process failures (wrong sequence, missed step, equipment malfunction)
+  - NOT normal process-induced changes (deformation from pressing, vibration from transport)
+  - NOT tracking/visual artifacts (slight contour changes, lighting variation)
+
+For reference, here are EXAMPLES of real anomaly types in industrial settings:
+  - material_anomaly: unexpected leakage, contamination, wrong material
+  - structural_failure: cracking, breaking, permanent damage
+  - mechanism_failure: getting stuck, unable to rotate/move, loss of function
+  - process_anomaly: wrong sequence, missed step, wrong position
 These are only examples. Use whatever classification best describes your findings.
 
 STEP 6 - SEVERITY ASSESSMENT:
 Rate severity (none/low/medium/high/critical) based on:
+- If no anomaly detected, severity MUST be "none"
 - Impact on task completion
 - Safety implications
 - Quality implications
@@ -615,11 +576,12 @@ Rate severity (none/low/medium/high/critical) based on:
 Output your analysis as JSON:
 {{
   "reasoning": {{
-    "step1_observation": "detailed observations referencing object IDs, frames, state changes...",
-    "step2_expectation": "expected normal behavior given materials and task...",
-    "step3_comparison": "specific deviations with object IDs and frame ranges...",
-    "step4_causation": "possible causes...",
-    "step5_classification": "your anomaly classifications (free-form, not restricted to examples)...",
+    "step0_process_understanding": "what process is this, which changes are expected vs anomalous...",
+    "step1_observation": "observations of potential anomalies only, referencing object IDs and frames...",
+    "step2_expectation": "expected normal behavior given the process and materials...",
+    "step3_comparison": "specific deviations between potential anomalies and expectations...",
+    "step4_causation": "possible root causes of confirmed anomalies...",
+    "step5_classification": "anomaly classifications (free-form)...",
     "step6_severity": "severity assessment with justification..."
   }},
   "anomalies": [
@@ -635,29 +597,56 @@ Output your analysis as JSON:
   ],
   "is_anomalous": true/false,
   "overall_severity": "none/low/medium/high/critical",
+  "process_changes_excluded": ["list of state changes that were normal process behavior, not anomalies"],
   "summary": "one paragraph summary grounded in the tracking data"
 }}"""
 
 
-PROMPT_VISUAL_VERIFICATION = """Examine these frames showing a potential anomaly.
+PROMPT_VISUAL_VERIFICATION = """Examine these caption and frames showing a potential anomaly. 
+
+Video Caption: {caption}
 
 CLAIMED ANOMALY:
 Type: {anomaly_type}
 Description: {anomaly_description}
 Affected objects: {affected_objects}
 
-Verify if this anomaly is actually present in the frames:
-1. Do you see evidence of the claimed anomaly?
-2. Is the description accurate?
-3. What is your confidence level?
+INSTRUCTION:
+Distinguish between process ACTIONS/MECHANICAL RESPONSES and process OUTCOMES:
+- Process actions (pressing, gripping, transporting) and their mechanical responses 
+  (deformation, compression, movement) are NORMAL — not anomalies.
+- Process outcomes that reveal object failure (material release, leaking, cracking, 
+  breaking, getting stuck) ARE potential anomalies, even if triggered by an intentional 
+  process action.
+
+Based on the video caption and frames:
+1. Is this claimed anomaly a mechanical response (deformation, compression) or a failure 
+   outcome (leaking, breaking, stuck)?
+2. If it's a failure outcome: does the evidence support it actually happened?
+3. If it's only a mechanical response: it should not be considered an anomaly.
+4. What is your confidence that this is a GENUINE anomaly?
 
 Output JSON:
 {{
   "verified": true/false,
+  "is_process_behavior": true/false,
   "confidence": 0.0-1.0,
-  "revised_description": "your description of what you see",
-  "key_frame": frame_index_with_clearest_evidence
+  "revised_description": "your description of what you conclude from comparing with caption or frames"
 }}"""
+
+
+PROMPT_VIDEO_CAPTION = """Describe what is happening in these video frames from an industrial process.
+
+Focus on:
+1. What object(s) are present? (materials, shapes, conditions)
+2. What machine/tool/equipment is acting on the object(s)?
+3. What actions are being performed? (pressing, rotating, transporting, inspecting, etc.)
+4. What observable changes occur across the frames? (deformation, material release, movement, etc.)
+5. What is the likely purpose of this process? (quality testing, assembly, packaging, etc.)
+
+Be factual and specific. Describe only what you can see — do not speculate beyond the visual evidence.
+
+Output a single paragraph caption (3-6 sentences)."""
 
 
 # =============================================================================
@@ -668,6 +657,74 @@ def load_config(config_path: str) -> Dict:
     """Load YAML configuration file."""
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
+
+
+def infer_change_cause(change_type: str, description: str, severity: str) -> str:
+    """
+    Infer a likely change_cause from change_type and description when Stage 2
+    did not provide one (i.e., old tracking data where change_cause="uncertain").
+
+    This uses the ACTION vs OUTCOME distinction:
+    - Mechanical responses (deformation, compression, movement) → "process_action"
+    - Failure outcomes (material release, cracking, breaking) → "object_failure"
+    - Visual artifacts (lighting, texture, surface with low severity) → "environmental"
+
+    The heuristic is applied as a fallback only when change_cause is "uncertain"
+    or empty. When Stage 2 provides a real cause label, it is used as-is.
+
+    Returns:
+        Inferred cause string. Returns "uncertain" if no confident inference.
+    """
+    ct = change_type.lower()
+    desc = description.lower()
+    sev = severity.lower()
+
+    # ---- Failure OUTCOMES: material release, structural damage, functional failure ----
+    # These are what tests are designed to detect → "object_failure"
+    outcome_type_keywords = (
+        'material_release', 'leak', 'dispens', 'flow', 'spill', 'ooze', 'seep',
+        'crack', 'break', 'fracture', 'tear', 'rupture', 'snap', 'split',
+        'stuck', 'jam', 'seize', 'block', 'detach', 'separate', 'disconnect',
+    )
+    if any(kw in ct for kw in outcome_type_keywords):
+        return "object_failure"
+
+    # Also check description for outcome indicators even if change_type is generic
+    outcome_desc_keywords = (
+        'leak', 'paste emerge', 'liquid emerge', 'material release',
+        'material coming out', 'material escap', 'crack appear', 'broke',
+        'stuck', 'detach', 'separated', 'snapped',
+    )
+    if any(kw in desc for kw in outcome_desc_keywords):
+        return "object_failure"
+
+    # ---- Mechanical RESPONSES: deformation, compression, position change ----
+    # Direct physical consequences of process actions → "process_action"
+    response_type_keywords = (
+        'deformation', 'deform', 'compress', 'flatten', 'bend', 'stretch',
+        'bulge', 'indent', 'crease', 'squish', 'squeeze',
+        'position', 'movement', 'shift', 'rotation', 'displacement',
+        'recovery', 'rebound', 'restore',
+    )
+    if any(kw in ct for kw in response_type_keywords):
+        return "process_action"
+
+    # ---- Environmental / noise: lighting, texture, surface with low severity ----
+    noise_type_keywords = (
+        'lighting', 'illumination', 'shadow', 'reflection',
+        'camera', 'focus', 'blur',
+        'background', 'environment',
+    )
+    if any(kw in ct for kw in noise_type_keywords):
+        return "environmental"
+
+    # Surface/texture changes at low severity are likely noise
+    if any(kw in ct for kw in ('surface', 'texture', 'color', 'appearance')):
+        if sev in ('none', 'slight'):
+            return "environmental"
+
+    return "uncertain"
+
 
 def load_prediction(prediction_dir: str, config: Dict) -> Dict:
     """
@@ -710,31 +767,13 @@ def load_prediction(prediction_dir: str, config: Dict) -> Dict:
             logger.warning(f"Failed to load {jf}: {e}")
             continue
         
-        # # Merge obj_info
-        # if "obj_info" in data and isinstance(data["obj_info"], dict):
-        #     pred_data["obj_info"].update(data["obj_info"])
-        
-        # # Merge state_change_events
-        # if "state_change_events" in data and isinstance(data["state_change_events"], list):
-        #     pred_data["state_change_events"].extend(data["state_change_events"])
-        
-        # # Merge frame-by-frame prediction masks
-        # if "prediction" in data and isinstance(data["prediction"], dict):
-        #     for frame_key, frame_masks in data["prediction"].items():
-        #         if frame_key not in pred_data["prediction"]:
-        #             pred_data["prediction"][frame_key] = {}
-        #         pred_data["prediction"][frame_key].update(frame_masks)
-        
-        # logger.info(f"Loaded: {jf.name}")
-         # Derive object ID from filename: 0000_1.json → obj_id "1"
-        
+        # Derive object ID from filename: 0000_1.json → obj_id "1"
         stem = jf.stem  # e.g., "0000_1"
         file_obj_id = stem.rsplit("_", 1)[-1] if "_" in stem else stem
         
         # Merge obj_info, re-keyed by the file-derived object ID
         if "obj_info" in data and isinstance(data["obj_info"], dict):
             for orig_key, obj_data in data["obj_info"].items():
-                # Use file_obj_id as the canonical key to avoid collisions
                 pred_data["obj_info"][file_obj_id] = obj_data
         
         # Merge state_change_events, ensuring object_idx matches file_obj_id
@@ -757,6 +796,14 @@ def load_prediction(prediction_dir: str, config: Dict) -> Dict:
     for event in pred_data["state_change_events"]:
         obj_idx = event.get("object_idx", "unknown")
         obj_info = pred_data["obj_info"].get(obj_idx, {})
+        cause = event.get("change_cause", "uncertain")
+        # Backward compat: infer cause when Stage 2 didn't provide one
+        if cause == "uncertain" or cause == "":
+            cause = infer_change_cause(
+                event.get("change_type", ""),
+                event.get("description", ""),
+                event.get("severity", "slight"),
+            )
         pred_data["state_changes"].append({
             "obj_id": obj_idx,
             "obj_name": obj_info.get("desc", "object"),
@@ -765,80 +812,13 @@ def load_prediction(prediction_dir: str, config: Dict) -> Dict:
             "change_type": event.get("change_type", "unknown"),
             "description": event.get("description", ""),
             "severity": event.get("severity", "slight"),
+            "change_cause": cause,
         })
     
     n_obj = len(pred_data["obj_info"])
     n_events = len(pred_data["state_change_events"])
     logger.info(f"Aggregated {len(json_files)} files: {n_obj} objects, {n_events} state change events")
     return pred_data
-
-    # # Convert state_change_events → state_changes list for analyze_state_changes()
-    # for event in pred_data["state_change_events"]:
-    #     obj_idx = event.get("object_idx", "unknown")
-    #     obj_info = pred_data["obj_info"].get(obj_idx, {})
-    #     pred_data["state_changes"].append({
-    #         "obj_id": obj_idx,
-    #         "obj_name": obj_info.get("desc", "object"),
-    #         "start_frame": event.get("start_frame", 0),
-    #         "end_frame": event.get("end_frame", 0),
-    #         "change_type": event.get("change_type", "unknown"),
-    #         "description": event.get("description", ""),
-    #         "severity": event.get("severity", "slight"),
-    #     })
-    
-    # n_obj = len(pred_data["obj_info"])
-    # n_events = len(pred_data["state_change_events"])
-    # logger.info(f"Aggregated {len(json_files)} files: {n_obj} objects, {n_events} state change events")
-    
-
-
-# def load_prediction(prediction_dir: str, config: Dict) -> Dict:
-#     """
-#     Load TubeletGraph prediction results.
-    
-#     Expected structure:
-#     {prediction_dir}/
-#     ├── {video_name}_predictions.json
-#     ├── predictions/
-#     │   └── *.png masks
-#     └── obj_info.json
-#     """
-#     # Try multiple possible paths based on TubeletGraph output structure
-#     possible_json_paths = [
-#         osp.join(prediction_dir, "predictions.json"),
-#         osp.join(prediction_dir, "obj_info.json"),
-#         osp.join(prediction_dir, "result.json"),
-#     ]
-    
-#     # Also check config for output directory
-#     # outdir = config.get("output", {}).get("outdir", "output")
-#     outdir = config.get("paths", {}).get("outdir",
-#          config.get("output", {}).get("outdir", "_pred_out"))
-#     pred_name = Path(prediction_dir).name
-#     possible_json_paths.extend([
-#         osp.join(outdir, prediction_dir, "predictions.json"),
-#         osp.join(outdir, pred_name, "predictions.json"),
-#     ])
-    
-#     # Find the JSON file
-#     pred_data = {}
-#     for path in possible_json_paths:
-#         if osp.isfile(path):
-#             with open(path, 'r') as f:
-#                 pred_data = json.load(f)
-#             logger.info(f"Loaded predictions from: {path}")
-#             break
-    
-#     if not pred_data:
-#         logger.warning(f"No prediction JSON found in {prediction_dir}")
-#         # Create minimal structure
-#         pred_data = {
-#             "objects": [],
-#             "frames": [],
-#             "state_changes": []
-#         }
-    
-#     return pred_data
 
 
 def extract_frames_from_video(video_path: str, sample_interval: int = 10) -> List[Tuple[int, Any]]:
@@ -908,6 +888,14 @@ def load_frames_from_dir(frames_dir: str, sample_interval: int = 10) -> List[Tup
 # ANOMALY DETECTION ENGINE
 # =============================================================================
 
+# Keywords in free-form CHANGE_CAUSE labels that indicate noise/environmental artifacts.
+# Used for pre-filtering before the reasoning chain to reduce false positives.
+NOISE_CAUSE_KEYWORDS = {
+    'environmental', 'noise', 'lighting', 'camera', 'background',
+    'tracking', 'artifact', 'jitter', 'vibration_noise'
+}
+
+
 class AnomalyDetectionEngine:
     """Main engine for VLM-based anomaly detection."""
     
@@ -967,6 +955,14 @@ class AnomalyDetectionEngine:
         
         if raw_changes:
             for change in raw_changes:
+                cause = change.get("change_cause", "uncertain")
+                # Backward compat: infer cause from change_type when Stage 2 didn't provide one
+                if cause == "uncertain" or cause == "":
+                    cause = infer_change_cause(
+                        change.get("change_type", ""),
+                        change.get("description", ""),
+                        change.get("severity", "slight"),
+                    )
                 state_changes.append(StateChange(
                     obj_id=change.get("obj_id", "unknown"),
                     obj_name=change.get("obj_name", "unknown"),
@@ -975,7 +971,8 @@ class AnomalyDetectionEngine:
                     change_type=change.get("change_type", "unknown"),
                     description=change.get("description", ""),
                     severity=change.get("severity", "slight"),
-                    confidence=change.get("confidence", 0.8)
+                    confidence=change.get("confidence", 0.8),
+                    change_cause=cause,
                 ))
         else:
             # Infer state changes from object tracking data
@@ -990,6 +987,13 @@ class AnomalyDetectionEngine:
                 # Check for recorded state changes in the object
                 obj_changes = obj.get("state_changes", [])
                 for change in obj_changes:
+                    cause = change.get("change_cause", "uncertain")
+                    if cause == "uncertain" or cause == "":
+                        cause = infer_change_cause(
+                            change.get("change_type", change.get("type", "")),
+                            change.get("description", ""),
+                            change.get("severity", "slight"),
+                        )
                     state_changes.append(StateChange(
                         obj_id=obj_id,
                         obj_name=obj_name,
@@ -998,21 +1002,115 @@ class AnomalyDetectionEngine:
                         change_type=change.get("change_type", change.get("type", "unknown")),
                         description=change.get("description", ""),
                         severity=change.get("severity", "slight"),
-                        confidence=change.get("confidence", 0.8)
+                        confidence=change.get("confidence", 0.8),
+                        change_cause=cause,
                     ))
         
         self.log(f"Found {len(state_changes)} state changes")
+        # Log cause distribution (helpful for debugging heuristic)
+        cause_counts: Dict[str, int] = {}
+        for sc in state_changes:
+            cause_counts[sc.change_cause] = cause_counts.get(sc.change_cause, 0) + 1
+        self.log(f"  Change cause distribution: {cause_counts}")
         return state_changes
+    
+    def prefilter_state_changes(
+        self,
+        state_changes: List[StateChange]
+    ) -> Tuple[List[StateChange], List[str]]:
+        """
+        Pre-filter state changes to remove noise/environmental artifacts before
+        the reasoning chain. Uses keyword matching on the free-form change_cause
+        labels produced by Stage 2.
+
+        Returns:
+            Tuple of (filtered_changes, excluded_descriptions)
+        """
+        filtered = []
+        excluded = []
+
+        for sc in state_changes:
+            cause_lower = sc.change_cause.lower()
+
+            # Filter out causes whose free-form label matches noise keywords
+            if any(kw in cause_lower for kw in NOISE_CAUSE_KEYWORDS):
+                excluded.append(
+                    f"[{sc.obj_name}] {sc.change_type}: {sc.description} "
+                    f"(filtered: cause='{sc.change_cause}')"
+                )
+                continue
+
+            # Filter out "none" severity
+            if sc.severity == 'none':
+                excluded.append(
+                    f"[{sc.obj_name}] {sc.change_type}: {sc.description} "
+                    f"(filtered: severity=none)"
+                )
+                continue
+
+            filtered.append(sc)
+
+        return filtered, excluded
+    
+    def generate_caption(
+        self,
+        frames: List[Tuple[int, Any]],
+        max_frames: int = 5
+    ) -> str:
+        """
+        Generate a video caption from sampled frames using the VLM.
+        Called automatically when no caption is provided.
+        
+        Args:
+            frames: List of (frame_idx, frame_array) tuples
+            max_frames: Maximum number of frames to send to the VLM
+            
+        Returns:
+            Generated caption string
+        """
+        if not frames:
+            return ""
+        
+        # Sample frames evenly across the video
+        if len(frames) <= max_frames:
+            selected = frames
+        else:
+            step = len(frames) / max_frames
+            indices = [int(i * step) for i in range(max_frames)]
+            selected = [frames[i] for i in indices]
+        
+        images = [f[1] for f in selected]
+        frame_indices = [f[0] for f in selected]
+        
+        self.log(f"Generating video caption from {len(images)} frames "
+                 f"(indices: {frame_indices})...")
+        
+        try:
+            response = self.vlm_client.query(
+                prompt=PROMPT_VIDEO_CAPTION,
+                images=images,
+                system_prompt="You are an expert industrial video analysis system. "
+                              "Describe what you observe factually and precisely.",
+                temperature=0.0,
+                max_tokens=512
+            )
+            caption = response.strip()
+            self.log(f"Generated caption: {caption[:200]}...")
+            return caption
+        except Exception as e:
+            logger.warning(f"Caption generation failed: {e}")
+            return ""
     
     def run_reasoning_chain(
         self,
         pred_data: Dict,
         state_changes: List[StateChange],
         task_context: Optional[str] = None,
-        frames: Optional[List[Tuple[int, Any]]] = None
+        frames: Optional[List[Tuple[int, Any]]] = None,
+        caption: Optional[str] = None
     ) -> Dict:
-        """Run the 6-step reasoning chain."""
-        self.log("Running 6-step reasoning chain...")
+        """Run the 7-step reasoning chain (Step 0–6)."""
+        self.log("Running 7-step reasoning chain (Step 0–6)...")
         
         # Prepare object info
         objects = pred_data.get("objects", pred_data.get("obj_info", []))
@@ -1022,18 +1120,25 @@ class AnomalyDetectionEngine:
         object_info_str = json.dumps(objects, indent=2)
         state_changes_str = json.dumps([asdict(sc) for sc in state_changes], indent=2)
         
-        # Default task context if not provided
+        # Default task context if not provided — process-aware
         if not task_context:
-            task_context = """Task: Industrial manipulation operation
-Expected behavior: Controlled object manipulation without damage
-Normal patterns: Smooth state transitions, expected material behaviors
-Failure conditions: Unexpected deformation, material leakage, grip failures"""
+            task_context = (
+                "Task: Industrial process (testing, assembly, or inspection)\n"
+                "The process intentionally applies forces/actions to objects as part of normal operation.\n"
+                "NORMAL (not anomalies): Process actions and their mechanical responses — deformation\n"
+                "under load, compression from gripping, positional shift during transport.\n"
+                "POTENTIAL ANOMALIES: Process outcomes that reveal object failure — material release\n"
+                "(leaking, dispensing), structural damage (cracking, breaking), functional failure\n"
+                "(getting stuck, losing function). These outcomes are what the test is designed to\n"
+                "detect, even though the action that triggered them was intentional."
+            )
         
         # Build prompt
         prompt = PROMPT_ANOMALY_REASONING.format(
             task_context=task_context,
             object_info=object_info_str,
-            state_changes=state_changes_str
+            state_changes=state_changes_str,
+            caption=caption
         )
         
         # Select frames for visual analysis if available
@@ -1061,29 +1166,17 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
         # Parse response
         result = self.parse_json_response(response)
         
-        # # Store reasoning steps
-        # reasoning = result.get("reasoning", {})
-        # for i, (step_name, step_output) in enumerate([
-        #     ("observation", reasoning.get("step1_observation", "")),
-        #     ("expectation", reasoning.get("step2_expectation", "")),
-        #     ("comparison", reasoning.get("step3_comparison", "")),
-        #     ("causation", reasoning.get("step4_causation", "")),
-        #     ("classification", reasoning.get("step5_classification", "")),
-        #     ("severity", reasoning.get("step6_severity", ""))
-        # ]):
-        #     self.reasoning_steps.append(ReasoningStep(
-        #         step_name=step_name,
-        #         step_number=i + 1,
-        #         input_context="",
-        #         output=step_output
-        #     ))
-        
         reasoning = result.get("reasoning", {})
         
         # Build input context for each step (what information fed into it)
         step_contexts = {
-            "observation": (
+            "process_understanding": (
                 f"Objects tracked: {object_info_str[:500]}\n"
+                f"State changes from tracking: {state_changes_str[:500]}\n"
+                f"Task context: {task_context}"
+            ),
+            "observation": (
+                f"Process understanding: {reasoning.get('step0_process_understanding', '')[:300]}\n"
                 f"State changes from tracking: {state_changes_str[:500]}\n"
                 f"Frames provided: {len(images) if images else 0}"
             ),
@@ -1109,6 +1202,7 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
         }
         
         for i, (step_name, step_output) in enumerate([
+            ("process_understanding", reasoning.get("step0_process_understanding", "")),
             ("observation", reasoning.get("step1_observation", "")),
             ("expectation", reasoning.get("step2_expectation", "")),
             ("comparison", reasoning.get("step3_comparison", "")),
@@ -1118,33 +1212,42 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
         ]):
             self.reasoning_steps.append(ReasoningStep(
                 step_name=step_name,
-                step_number=i + 1,
+                step_number=i,
                 input_context=step_contexts.get(step_name, ""),
                 output=step_output
-            ))        
-        
+            ))
+
         return result
     
     def verify_anomalies_visually(
         self,
         anomalies: List[Dict],
-        frames: List[Tuple[int, Any]]
+        frames: List[Tuple[int, Any]],
+        caption: str
     ) -> List[Dict]:
-        """Verify detected anomalies with visual evidence."""
+        """Verify detected anomalies with visual evidence. Process-aware."""
         if not frames:
             return anomalies
         
         verified = []
         for anomaly in anomalies:
+
+            # Directly keep very confident anomalies
+            if anomaly.get("confidence", 0.0) >= 0.8:
+                verified.append(anomaly)
+                continue
+            
+            # Directly discard very low confidence
+            if anomaly.get("confidence", 1.0) <= 0.2:
+                continue
+
             evidence_frames = anomaly.get("evidence_frames", [])
             
             # Get frames for verification
             frame_images = []
             for ev_frame in evidence_frames[:3]:  # Max 3 frames
                 for idx, frame in frames:
-                    if abs(idx - ev_frame) <= 5:  # Allow some tolerance
-                        frame_images.append(frame)
-                        break
+                    frame_images.append(frame)
             
             if not frame_images:
                 # Use middle frames if no specific evidence frames
@@ -1155,7 +1258,8 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
                 prompt = PROMPT_VISUAL_VERIFICATION.format(
                     anomaly_type=anomaly.get("anomaly_type", "unknown"),
                     anomaly_description=anomaly.get("description", ""),
-                    affected_objects=", ".join(anomaly.get("affected_objects", []))
+                    affected_objects=", ".join(anomaly.get("affected_objects", [])),
+                    caption=caption
                 )
                 
                 try:
@@ -1168,26 +1272,45 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
                     )
                     
                     result = self.parse_json_response(response)
+
+                    print("TESTING!!!!!!")
+                    print("caption:", caption)
+                    print("verify vlm:", result)
+                    print("verify judge:", result.get("verified", ""))
+                    print("verify is_process_behavior:", result.get("is_process_behavior", ""))
+                    print("verify conf:", result.get("confidence", -999))
+                    print("anomaly conf:", anomaly.get("confidence", -999))
                     
-                    if result.get("verified", True):
-                        # Update confidence based on verification
-                        new_confidence = (anomaly.get("confidence", 0.8) + result.get("confidence", 0.8)) / 2
-                        anomaly["confidence"] = new_confidence
+                    if result.get("verified", True) and not result.get("is_process_behavior", False):
+                        # Genuine anomaly confirmed
                         anomaly["verified"] = True
-                        verified.append(anomaly)
-                    else:
-                        # Reduce confidence significantly
-                        anomaly["confidence"] = anomaly.get("confidence", 0.8) * 0.3
-                        anomaly["verified"] = False
+                        new_confidence = anomaly.get("confidence", 0.8) * result.get("confidence", 0.8)
+                        anomaly["confidence"] = new_confidence
                         if anomaly["confidence"] >= 0.3:
                             verified.append(anomaly)
+                        else:
+                            print("verify discard (low confidence)!!!!")
+                    elif result.get("is_process_behavior", False):
+                        # VLM says this is normal process behavior → discard
+                        self.log(f"Discarded as process behavior: "
+                                 f"{anomaly.get('description', '')[:80]}")
+                        print("verify discard (process behavior)!!!!")
+                    else:
+                        # Not verified
+                        anomaly["verified"] = False
+                        new_confidence = anomaly.get("confidence", 0.8) * (1 - result.get("confidence", 0.8))
+                        anomaly["confidence"] = new_confidence
+                        if anomaly["confidence"] >= 0.3:
+                            verified.append(anomaly)
+                        else:
+                            print("verify discard (not verified)!!!!")
                             
                 except Exception as e:
                     logger.warning(f"Visual verification failed: {e}")
                     verified.append(anomaly)
             else:
                 verified.append(anomaly)
-        
+       
         return verified
     
     def detect_anomalies(
@@ -1196,7 +1319,8 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
         video_path: Optional[str] = None,
         sample_interval: int = 10,
         task_context: Optional[str] = None,
-        verify_visually: bool = True
+        verify_visually: bool = True,
+        caption: Optional[str] = None,
     ) -> AnomalyReport:
         """
         Main anomaly detection pipeline.
@@ -1207,6 +1331,7 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
             sample_interval: Frame sampling interval
             task_context: Task description and expectations
             verify_visually: Whether to verify anomalies with visual evidence
+            caption: Video caption from earlier stages
             
         Returns:
             Complete AnomalyReport
@@ -1232,12 +1357,25 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
         # Analyze state changes
         state_changes = self.analyze_state_changes(pred_data, frames)
         
+        # Generate caption from video frames if not provided
+        if not caption and frames:
+            self.log("No caption provided — generating from video frames...")
+            caption = self.generate_caption(frames)
+        
+        # Pre-filter state changes: remove noise/environmental artifacts
+        state_changes, excluded = self.prefilter_state_changes(state_changes)
+        if excluded:
+            self.log(f"Pre-filtered {len(excluded)} noise/environmental state changes:")
+            for desc in excluded:
+                self.log(f"  - {desc}")
+        
         # Run reasoning chain
         reasoning_result = self.run_reasoning_chain(
             pred_data,
             state_changes,
             task_context,
-            frames
+            frames,
+            caption
         )
         
         # Extract anomalies
@@ -1246,7 +1384,7 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
         # Visual verification if requested
         if verify_visually and frames and raw_anomalies:
             self.log("Verifying anomalies with visual evidence...")
-            raw_anomalies = self.verify_anomalies_visually(raw_anomalies, frames)
+            raw_anomalies = self.verify_anomalies_visually(raw_anomalies, frames, caption=caption)
         
         # Convert to DetectedAnomaly objects
         anomalies = []
@@ -1264,13 +1402,14 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
                 confidence=raw.get("confidence", 0.8),
                 reasoning_trace=reasoning_result.get("reasoning", {})
             ))
-        
+
         # Determine overall status
         is_anomalous = len(anomalies) > 0
         overall_severity = reasoning_result.get("overall_severity", "none")
         if anomalies and overall_severity == "none":
             severity_order = ["none", "low", "medium", "high", "critical"]
-            max_sev = max(severity_order.index(a.severity) for a in anomalies)
+            max_sev = max(severity_order.index(a.severity) for a in anomalies
+                         if a.severity in severity_order)
             overall_severity = severity_order[max_sev]
         
         # Extract identified events
@@ -1278,9 +1417,15 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
         reasoning = reasoning_result.get("reasoning", {})
         obs = reasoning.get("step1_observation", "")
         if obs:
-            # Split into bullet points or sentences
             events = [e.strip() for e in obs.replace("\n", ". ").split(".") if e.strip()]
-            identified_events = events[:10]  # Cap at 10 events
+            identified_events = events[:10]
+        
+        # Log process-excluded changes from the VLM reasoning
+        process_excluded = reasoning_result.get("process_changes_excluded", [])
+        if process_excluded:
+            self.log(f"VLM excluded {len(process_excluded)} state changes as normal process behavior:")
+            for pe in process_excluded:
+                self.log(f"  - {pe}")
         
         # Generate summary
         summary = reasoning_result.get("summary", "")
@@ -1306,7 +1451,8 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
             anomalous_transitions=[asdict(a) for a in anomalies if a.severity in ["high", "critical"]],
             summary=summary,
             timestamp=datetime.now().isoformat(),
-            processing_time=processing_time
+            processing_time=processing_time,
+            caption=caption
         )
         
         return report
@@ -1377,6 +1523,7 @@ def save_report_json(report: AnomalyReport, output_path: str):
     report_dict = {
         "video_name": report.video_name,
         "prediction_name": report.prediction_name,
+        "caption": report.caption,
         "anomaly_detected": report.anomaly_detected,
         "num_anomalies": report.num_anomalies,
         "overall_severity": report.overall_severity,
@@ -1387,7 +1534,7 @@ def save_report_json(report: AnomalyReport, output_path: str):
         "anomalous_transitions": report.anomalous_transitions,
         "summary": report.summary,
         "timestamp": report.timestamp,
-        "processing_time": report.processing_time
+        "processing_time": report.processing_time,
     }
     
     with open(output_path, 'w') as f:
@@ -1441,6 +1588,9 @@ Examples:
                         help='Output directory for reports')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Verbose output')
+    # for captioning
+    parser.add_argument('--caption', type=str, default='',
+                        help='Video Captioning')
        
     return parser
 
@@ -1454,17 +1604,14 @@ def main():
     config = load_config(args.FILE)
     
     # Get output directory from config
-    # outdir = config.get("output", {}).get("outdir", "output")
     outdir = config.get("paths", {}).get("outdir",
          config.get("output", {}).get("outdir", "_pred_out"))
     
     # Resolve prediction directory
     pred_dir = args.PRED
     if not osp.isdir(pred_dir):
-        # Try with outdir prefix
         pred_dir = osp.join(outdir, args.PRED)
     if not osp.isdir(pred_dir):
-        # Try finding it
         for possible in [args.PRED, osp.join(outdir, args.PRED)]:
             if osp.isdir(possible):
                 pred_dir = possible
@@ -1497,16 +1644,27 @@ def main():
             prediction_dir=pred_dir,
             video_path=args.video_path,
             sample_interval=args.sample_interval,
-            verify_visually=args.video_path is not None
+            verify_visually=args.video_path is not None,
+            caption=args.caption
         )
         
         # Print formatted output
         output = format_report_output(report)
-        print(output)
         
         # Save JSON report
-        os.makedirs(args.output_dir, exist_ok=True)
-        json_path = osp.join(args.output_dir, f"{report.video_name}_report.json")
+        if args.video_path:
+            parts = Path(args.video_path).parts
+            try:
+                phys_ad_idx = next(i for i, p in enumerate(parts) if p == "Phys-AD")
+                rel_subdir = osp.join(*parts[phys_ad_idx:-1])
+            except StopIteration:
+                rel_subdir = ""
+        else:
+            rel_subdir = ""
+
+        report_dir = osp.join(args.output_dir, rel_subdir)
+        os.makedirs(report_dir, exist_ok=True)
+        json_path = osp.join(report_dir, f"{report.video_name}_report.json")
         save_report_json(report, json_path)
         
     else:
@@ -1520,6 +1678,7 @@ def main():
         for sc in state_changes:
             print(f"\n[{sc.obj_name}] Frame {sc.start_frame}-{sc.end_frame}")
             print(f"  Type: {sc.change_type}")
+            print(f"  Cause: {sc.change_cause}")
             print(f"  Description: {sc.description}")
             print(f"  Severity: {sc.severity}")
 
