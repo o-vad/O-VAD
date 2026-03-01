@@ -1,0 +1,77 @@
+
+================================================================================
+ST-VAD ANOMALY DETECTION REPORT
+================================================================================
+Video: IPAD-01
+Path: assets/example/IPAD-01
+Prediction: custom-IPAD-01-Ours_gpt-4.1
+Processing Time: 24.1s
+================================================================================
+
+DETECTION RESULT:
+  Anomaly Detected: YES ❌
+  Number of Anomalies: 1
+  Overall Severity: high
+
+================================================================================
+REASONING TRACE:
+================================================================================
+
+  Step 1 - OBSERVATION:
+    Object 1 (Flat plastic pouch) experienced multiple deformations across frames 0-140, with changes in shape and orientation. Object 2 (Mechanical hinge assembly) showed slight deformations in frames 10-220, mainly due to pressure. Object 3 (Cardboard box) underwent vertical compression and deformation in frames 0-250, with a significant disappearance in frames 190-200.
+
+  Step 2 - EXPECTATION:
+    The flat plastic pouch should maintain its shape without significant deformation, given its flexible plastic material. The mechanical hinge assembly, made of metal, should resist deformation unless excessive force is applied. The cardboard box should remain intact and upright, withstanding normal pressure without collapsing.
+
+  Step 3 - COMPARISON:
+    Object 1's moderate deformations in frames 20-50 and 90-140 were unexpected, indicating excessive force. Object 3's disappearance in frames 190-200 was highly unexpected, suggesting a severe anomaly.
+
+  Step 4 - CAUSATION:
+    Possible causes include excessive force applied to the flat plastic pouch, leading to deformation. The cardboard box's disappearance could be due to a handling error or equipment malfunction.
+
+  Step 5 - CLASSIFICATION:
+    Object 1: deformation_anomaly (excessive force). Object 3: process_anomaly (disappearance).
+
+  Step 6 - SEVERITY:
+    Object 1's deformations are medium severity due to potential impact on task quality. Object 3's disappearance is critical due to complete task failure and potential safety risks.
+
+================================================================================
+IDENTIFIED EVENTS:
+================================================================================
+  1. Object 1 (Flat plastic pouch) experienced multiple deformations across frames 0-140, with changes in shape and orientation
+  2. Object 2 (Mechanical hinge assembly) showed slight deformations in frames 10-220, mainly due to pressure
+  3. Object 3 (Cardboard box) underwent vertical compression and deformation in frames 0-250, with a significant disappearance in frames 190-200
+
+================================================================================
+DETECTED ANOMALIES:
+================================================================================
+
+  [anomaly_0000]
+    Type: process_anomaly / disappearance
+    Severity: critical
+    Confidence: 0.85
+    Description: The cardboard box disappeared between frames 190-200, indicating a severe process anomaly.
+    Affected Objects: 3
+    Evidence Frames: [190, 200]
+
+================================================================================
+
+SUMMARY:
+  The analysis identified significant anomalies in the manipulation task. The flat plastic pouch experienced medium severity deformations due to excessive force, while the cardboard box's disappearance in frames 190-200 represents a critical process anomaly, potentially impacting task completion and safety.
+
+================================================================================
+STATE CHANGES (33 tracked):
+================================================================================
+  [Flat plastic pouch] Frames 0-10: deformation (slight)
+  [Flat plastic pouch] Frames 10-20: deformation (slight)
+  [Flat plastic pouch] Frames 20-30: deformation (moderate)
+  [Flat plastic pouch] Frames 30-40: deformation (moderate)
+  [Flat plastic pouch] Frames 40-50: deformation (moderate)
+  [Flat plastic pouch] Frames 70-80: deformation (slight)
+  [Flat plastic pouch] Frames 90-100: deformation (moderate)
+  [Flat plastic pouch] Frames 100-110: deformation (slight)
+  [Flat plastic pouch] Frames 110-120: deformation (slight)
+  [Flat plastic pouch] Frames 130-140: deformation (moderate)
+  ... and 23 more
+
+================================================================================
