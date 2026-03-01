@@ -410,17 +410,6 @@ failure (getting stuck, losing elasticity), and similar outcomes are POTENTIAL A
 even when triggered by an intentional test action. The whole point of industrial testing is 
 to expose such failures.
 
-Examples of NORMAL process actions and mechanical responses (NOT anomalies):
-- A press compresses an object → deformation under the press is expected
-- A conveyor transports items with slight vibration → positional shift is expected
-- A gripper squeezes a tube → compression of the tube is expected
-
-Examples of REAL anomalies (process OUTCOMES indicating failure):
-- A tube leaks paste/liquid from its body, seam, or nozzle under pressure
-- A mechanism gets stuck and fails to rotate or move
-- An object cracks, breaks, or suffers permanent structural damage
-- A component detaches or separates unexpectedly
-- Wrong sequence of operations or missed steps
 
 Your role is to:
 1. First understand what the process/test is doing (ACTIONS) and what it's testing for (OUTCOMES)
@@ -474,10 +463,7 @@ CRITICAL DISTINCTION — separate process ACTIONS from process OUTCOMES:
   that triggered them was intentional. The purpose of a test is to expose such failures.
 - Slight contour/shape variations between frames can be tracking noise — ignore these.
 
-EXAMPLE: A press squeezes a toothpaste tube. The squeezing ACTION and resulting 
-DEFORMATION are expected. But if paste LEAKS OUT, that is a test OUTCOME revealing 
-a potential defect — it should be flagged as a potential anomaly, not dismissed as 
-normal process behavior.
+
 
 TASK CONTEXT:
 {task_context}
@@ -524,7 +510,7 @@ Re-categorize each state change event as one of:
   - "expected_process": Process actions and their direct mechanical responses 
     (deformation from pressing, movement from transport, compression from gripping)
   - "potential_anomaly": Process outcomes that indicate object failure or defect 
-    (material release, structural damage, functional failure, stuck mechanisms) — 
+    (structural damage, functional failure, stuck mechanisms) — 
     even if triggered by an intentional process action
   - "noise": Minor variations from tracking, lighting, or camera (ignore these)
 
@@ -663,49 +649,6 @@ Be factual and specific. Describe only what you can see — do not speculate bey
 Output a single paragraph caption (3-6 sentences)."""
 
 
-PROMPT_INFER_TASK_CONTEXT = """You are an expert at identifying industrial testing and manufacturing processes from video descriptions.
-
-VIDEO CAPTION:
-{caption}
-
-TRACKED OBJECTS:
-{object_info}
-
-STATE CHANGES DETECTED:
-{state_changes_summary}
-
-Based on all available information, infer:
-
-1. PROCESS TYPE: What specific industrial test or process is this? 
-   (e.g., pressure seal test, magnet retention test, adhesion test, assembly verification, 
-   drop test, vibration test, torque test, transport stability test, etc.)
-
-2. PROCESS ACTIONS: What does the machine/tool DO to the object? 
-   (e.g., presses, rotates, shakes, pulls, transports)
-   These actions are always NORMAL — they are the test procedure itself.
-
-3. MECHANICAL RESPONSES: What direct physical responses to the actions are EXPECTED and NORMAL?
-   (e.g., deformation under pressure, tilting during rotation, vibration during transport)
-
-4. PASS CRITERIA: What would a PASSING result look like?
-   (e.g., tube withstands pressure without leaking, magnet holds object through rotation, 
-   item stays stable on conveyor)
-
-5. FAIL CRITERIA: What OUTCOMES would indicate the object FAILED the test?
-   (e.g., material leaks out, object separates/falls, mechanism gets stuck, structure cracks)
-   These are the anomalies the test is designed to detect.
-
-Output as JSON:
-{{
-  "process_type": "specific name of the test/process",
-  "process_actions": "what the machine does (always normal)",
-  "mechanical_responses": "expected physical responses to actions (normal, not anomalies)",
-  "pass_criteria": "what a passing result looks like",
-  "fail_criteria": "what outcomes indicate failure (these ARE the anomalies)",
-  "task_context": "A complete 3-5 sentence task context paragraph that a downstream industrial anomaly detector can use for testing. It should clearly state: what the test is, what actions/responses are normal, and what specific outcomes indicate failure."
-}}"""
-
-
 # =============================================================================
 # VIDEO AND DATA LOADING UTILITIES
 # =============================================================================
@@ -742,7 +685,6 @@ def infer_change_cause(change_type: str, description: str, severity: str) -> str
         'material_release', 'leak', 'dispens', 'flow', 'spill', 'ooze', 'seep',
         'crack', 'break', 'fracture', 'tear', 'rupture', 'snap', 'split',
         'stuck', 'jam', 'seize', 'block', 'detach', 'separate', 'disconnect',
-        'fall', 'drop', 'release', 'loosen', 'dislodge', 'collapse',
     )
     if any(kw in ct for kw in outcome_type_keywords):
         return "object_failure"
@@ -752,8 +694,6 @@ def infer_change_cause(change_type: str, description: str, severity: str) -> str
         'leak', 'paste emerge', 'liquid emerge', 'material release',
         'material coming out', 'material escap', 'crack appear', 'broke',
         'stuck', 'detach', 'separated', 'snapped',
-        'fall', 'falling', 'dropped', 'released', 'loosening', 'dislodge',
-        'no longer in contact', 'moves away', 'separates from',
     )
     if any(kw in desc for kw in outcome_desc_keywords):
         return "object_failure"
@@ -1161,97 +1101,6 @@ class AnomalyDetectionEngine:
             logger.warning(f"Caption generation failed: {e}")
             return ""
     
-    def infer_task_context(
-        self,
-        pred_data: Dict,
-        state_changes: List[StateChange],
-        caption: str,
-        frames: Optional[List[Tuple[int, Any]]] = None
-    ) -> str:
-        """
-        Automatically infer a test-specific task_context from the caption, object 
-        info, and state changes. This replaces the generic default task_context with 
-        one that understands the specific test being performed and its pass/fail criteria.
-
-        For example:
-        - Tube pressure test → "leaking = FAIL, deformation = normal"
-        - Magnet retention test → "object separating/falling = FAIL, tilting during rotation = normal"
-        - Transport stability test → "items falling off conveyor = FAIL, vibration = normal"
-
-        Args:
-            pred_data: Prediction data with object info
-            state_changes: Analyzed state changes
-            caption: Video caption (required)
-            frames: Optional frames for visual context
-
-        Returns:
-            Inferred task_context string, or empty string if inference fails
-        """
-        if not caption:
-            self.log("Cannot infer task context without caption")
-            return ""
-        
-        # Prepare inputs
-        objects = pred_data.get("objects", pred_data.get("obj_info", []))
-        if isinstance(objects, dict):
-            objects = [{"obj_id": k, **v} for k, v in objects.items()]
-        object_info_str = json.dumps(objects, indent=2)[:1000]
-        
-        # Summarize state changes (compact)
-        sc_summary_lines = []
-        for sc in state_changes[:15]:  # Cap at 15 to stay concise
-            sc_summary_lines.append(
-                f"- [{sc.obj_name}] frames {sc.start_frame}-{sc.end_frame}: "
-                f"{sc.change_type} ({sc.severity}) — {sc.description[:100]}"
-            )
-        sc_summary = "\n".join(sc_summary_lines) if sc_summary_lines else "(no state changes detected)"
-        
-        prompt = PROMPT_INFER_TASK_CONTEXT.format(
-            caption=caption,
-            object_info=object_info_str,
-            state_changes_summary=sc_summary
-        )
-        
-        # Optionally include frames for visual grounding
-        images = None
-        if frames and len(frames) >= 2:
-            # First and last frame give the most context
-            images = [frames[0][1], frames[-1][1]]
-            if len(frames) > 2:
-                images.insert(1, frames[len(frames) // 2][1])
-        
-        self.log("Inferring test-specific task context from caption + objects...")
-        
-        try:
-            response = self.vlm_client.query(
-                prompt=prompt,
-                images=images,
-                system_prompt=(
-                    "You are an expert at identifying industrial testing and manufacturing "
-                    "processes. Infer the specific test type and its pass/fail criteria."
-                ),
-                temperature=0.0,
-                max_tokens=1024
-            )
-            
-            result = self.parse_json_response(response)
-            
-            inferred_context = result.get("task_context", "")
-            
-            if inferred_context:
-                self.log(f"Inferred task context: {inferred_context[:200]}...")
-                self.log(f"  Process type: {result.get('process_type', 'unknown')}")
-                self.log(f"  Pass criteria: {result.get('pass_criteria', 'unknown')}")
-                self.log(f"  Fail criteria: {result.get('fail_criteria', 'unknown')}")
-                return inferred_context
-            else:
-                logger.warning("Task context inference returned empty context")
-                return ""
-                
-        except Exception as e:
-            logger.warning(f"Task context inference failed: {e}")
-            return ""
-    
     def run_reasoning_chain(
         self,
         pred_data: Dict,
@@ -1519,15 +1368,6 @@ class AnomalyDetectionEngine:
             self.log(f"Pre-filtered {len(excluded)} noise/environmental state changes:")
             for desc in excluded:
                 self.log(f"  - {desc}")
-        
-        # Infer test-specific task context if not explicitly provided
-        if not task_context and caption:
-            self.log("No explicit task_context — inferring from caption + objects...")
-            task_context = self.infer_task_context(
-                pred_data, state_changes, caption, frames
-            )
-            if not task_context:
-                self.log("Inference returned empty — will use generic default in reasoning chain")
         
         # Run reasoning chain
         reasoning_result = self.run_reasoning_chain(
