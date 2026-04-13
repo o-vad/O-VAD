@@ -1,0 +1,86 @@
+
+================================================================================
+ST-VAD ANOMALY DETECTION REPORT
+================================================================================
+Video: 0000
+Path: assets/example/PhysAD/0000.mp4
+Prediction: custom-0000-Ours_gpt-4.1
+Processing Time: 35.0s
+================================================================================
+
+DETECTION RESULT:
+  Anomaly Detected: YES ❌
+  Number of Anomalies: 2
+  Overall Severity: medium
+
+================================================================================
+REASONING TRACE:
+================================================================================
+
+  Step 1 - OBSERVATION:
+    The toothpaste tube (obj_id: 1) underwent multiple deformations from frames 30 to 170, with increasing severity. Initially, slight deformations were observed, progressing to moderate as the pressing tool applied more force. At frame 170, material release occurred, with white paste emerging from the tube. The cap (obj_id: 2) was detached and not involved in the deformation process.
+
+  Step 2 - EXPECTATION:
+    The task should involve controlled manipulation of the tube without causing damage or material release. The tube should maintain its integrity, with deformation limited to reversible changes without leakage.
+
+  Step 3 - COMPARISON:
+    Unexpected material release occurred at frames 170-179, deviating from the expectation of maintaining tube integrity. The deformation was more severe than anticipated, indicating excessive pressure.
+
+  Step 4 - CAUSATION:
+    Possible causes include excessive force applied by the pressing tool, misalignment of the tool, or a defect in the tube material leading to premature failure.
+
+  Step 5 - CLASSIFICATION:
+    material_anomaly (unexpected leakage), deformation_anomaly (excessive deformation leading to leakage)
+
+  Step 6 - SEVERITY:
+    Severity is rated as medium due to the impact on task completion and potential quality issues from the leakage. The issue is partially reversible but indicates a need for process adjustment.
+
+================================================================================
+IDENTIFIED EVENTS:
+================================================================================
+  1. The toothpaste tube (obj_id: 1) underwent multiple deformations from frames 30 to 170, with increasing severity
+  2. Initially, slight deformations were observed, progressing to moderate as the pressing tool applied more force
+  3. At frame 170, material release occurred, with white paste emerging from the tube
+  4. The cap (obj_id: 2) was detached and not involved in the deformation process
+
+================================================================================
+DETECTED ANOMALIES:
+================================================================================
+
+  [anomaly_0000]
+    Type: material_anomaly / unexpected leakage
+    Severity: medium
+    Confidence: 0.88
+    Description: White paste leaked from the tube at frames 170-179, indicating a failure to maintain tube integrity under pressure.
+    Affected Objects: 1
+    Evidence Frames: [170, 179]
+
+  [anomaly_0001]
+    Type: deformation_anomaly / excessive deformation
+    Severity: medium
+    Confidence: 0.85
+    Description: The tube experienced excessive deformation from frames 30 to 170, leading to material release.
+    Affected Objects: 1
+    Evidence Frames: [30, 170]
+
+================================================================================
+
+SUMMARY:
+  The manipulation task resulted in unexpected material release from the toothpaste tube due to excessive deformation. The pressing tool applied more force than necessary, leading to leakage at frames 170-179. This indicates a need for process adjustments to prevent future occurrences.
+
+================================================================================
+STATE CHANGES (22 tracked):
+================================================================================
+  [Toothpaste tube (Darlie brand)] Frames 30-40: deformation (slight)
+  [Toothpaste tube (Darlie brand)] Frames 50-60: deformation (slight)
+  [Toothpaste tube (Darlie brand)] Frames 60-70: deformation (moderate)
+  [Toothpaste tube (Darlie brand)] Frames 70-80: deformation (moderate)
+  [Toothpaste tube (Darlie brand)] Frames 80-90: deformation (moderate)
+  [Toothpaste tube (Darlie brand)] Frames 90-100: deformation (moderate)
+  [Toothpaste tube (Darlie brand)] Frames 120-130: deformation (moderate)
+  [Toothpaste tube (Darlie brand)] Frames 140-150: deformation (slight)
+  [Toothpaste tube (Darlie brand)] Frames 150-160: deformation (moderate)
+  [Toothpaste tube (Darlie brand)] Frames 160-170: deformation (moderate)
+  ... and 12 more
+
+================================================================================

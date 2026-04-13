@@ -1,0 +1,12 @@
+[submodule "thirdparty/RMem"]
+	path = thirdparty/RMem
+	url = https://github.com/YihongSun/RMem.git
+[submodule "thirdparty/sam2"]
+	path = thirdparty/sam2
+	url = https://github.com/YihongSun/sam2.git
+[submodule "thirdparty/Entity"]
+	path = thirdparty/Entity
+	url = https://github.com/YihongSun/Entity.git
+[submodule "thirdparty/fc-clip"]
+	path = thirdparty/fc-clip
+	url = https://github.com/YihongSun/fc-clip.git

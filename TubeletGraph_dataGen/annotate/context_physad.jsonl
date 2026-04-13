@@ -1,0 +1,22 @@
+{"subset":"ball", "objects":["ball", "gripper"]}
+{"subset":"button", "objects":["button", "plunger"]}
+{"subset":"car", "objects":["car", "plunger"]}
+{"subset":"caster_wheel", "objects":["caster_wheel"]}
+{"subset":"clip", "objects":["clip", "plunger"]}
+{"subset":"clock", "objects":["clock"]}
+{"subset":"fan", "objects":["fan"]}
+{"subset":"gear", "objects":["gear"]}
+{"subset":"hinge", "objects":["hinge", "gripper"]}
+{"subset":"liquid", "objects":["liquid", "gripper"]}
+{"subset":"lock", "objects":["lock"]}
+{"subset":"magnet", "objects":["magnet", "gripper"]}
+{"subset":"rolling_bearing", "objects":["rolling_bearing", "gripper"]}
+{"subset":"rubber_band", "objects":["rubber_band", "gripper"]}
+{"subset":"screw", "objects":["screw", "screwdriver"]}
+{"subset":"servo", "objects":["servo"]}
+{"subset":"slide", "objects":["ball bearing", "rail"]}
+{"subset":"spherical_bearing", "objects":["spherical_bearing", "gripper"]}
+{"subset":"sticky_roller", "objects":["sticky_roller", "gripper"]}
+{"subset":"toothpaste", "objects":["toothpaste", "gripper"]}
+{"subset":"usb", "objects":["usb", "gripper"]}
+{"subset":"zipper", "objects":["zipper", "gripper"]}
