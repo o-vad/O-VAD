@@ -4,6 +4,7 @@
 
 ### PhysAD
 
+Download from this website: https://huggingface.co/datasets/guoliz/Phys-AD.
 ```bash
 unzip Phys_AD_Data_part_0000_of_0006.zip -d Phys-AD
 ```
