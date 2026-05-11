@@ -30,13 +30,6 @@ Naming convention for local scratch dirs (globally unique across all categories)
 Local TubeletGraph scratch (_custom_dataset, _interm_out, _pred_out) are cleaned
 per-video immediately after NVMe data is safely stored.
 
-Metrics (Stage 4, printed after all inference):
-  Video-level (5) : Accuracy, Precision, Recall, F1, AUROC
-                    (report["anomaly_detected"] vs VQA["answer"])
-  BERT score      : cosine similarity between VQA["context"] and
-                    report["anomalies"][*]["anomaly_type"] + ["anomaly_subtype"]
-                    using google-bert/bert-base-uncased CLS-token embeddings.
-
 Usage:
     python pipe.py analyze <video_dir> -c <config> [options]
 """
@@ -59,6 +52,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from contextlib import contextmanager
 
 from tqdm import trange, tqdm
+
+import gc
 
 # ---------------------------------------------------------------------------
 # Global Storage Roots
@@ -172,6 +167,167 @@ def _report_nvme_path(video_path: str, vqa_metadata: Dict) -> Path:
     return STAGE3_ROOT / parent / f"{stem}_report.json"
 
 
+import os
+import re
+import base64
+import torch
+from pathlib import Path
+from PIL import Image
+from typing import Optional, List, Dict, Any, Tuple
+
+# Fallback definitions to ensure the code is ready-to-run
+try:
+    import openai as _openai_mod
+    HAS_OPENAI = True
+except ImportError:
+    HAS_OPENAI = False
+
+CAPTION_MAX_FRAMES = 8  # Adjust this default if needed
+
+
+# ---------------------------------------------------------------------------
+# OpenAI Responses API client
+# ---------------------------------------------------------------------------
+
+class _OpenAIResponsesClient:
+    """
+    Minimal OpenAI Responses-API client used for the Stage 1 captioning call.
+    """
+
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o"):
+        if not HAS_OPENAI:
+            raise ImportError(
+                "'openai' package not installed — cannot run caption generation. "
+                "Install it with: pip install openai"
+            )
+        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        self.model   = model
+        self.client  = _openai_mod.OpenAI(api_key=self.api_key)
+
+    def _encode_image(self, image_path: str) -> Dict:
+        """Encode a local image file as a base64 input_image block."""
+        ext        = Path(image_path).suffix.lower().lstrip(".")
+        media_type = {
+            "jpg": "image/jpeg", "jpeg": "image/jpeg",
+            "png": "image/png",  "webp": "image/webp",
+        }.get(ext, "image/jpeg")
+        with open(image_path, "rb") as f:
+            data = base64.b64encode(f.read()).decode("utf-8")
+        return {
+            "type":      "input_image",
+            "image_url": f"data:{media_type};base64,{data}",
+        }
+
+    def query(
+        self,
+        prompt: str,
+        image_paths: Optional[List[str]] = None,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.0,
+        max_tokens: int = 1024,
+    ) -> str:
+        content: List[Dict] = []
+        if image_paths:
+            for p in image_paths:
+                content.append(self._encode_image(p))
+        content.append({"type": "input_text", "text": prompt})
+
+        kwargs: Dict[str, Any] = {
+            "model":             self.model,
+            "input":             [{"role": "user", "content": content}],
+            "max_output_tokens": max_tokens,
+            "temperature":       temperature,
+        }
+        if system_prompt:
+            kwargs["instructions"] = system_prompt
+
+        response = self.client.responses.create(**kwargs)
+        return response.output_text
+
+
+# ---------------------------------------------------------------------------
+# Qwen VLM API client wrapper
+# ---------------------------------------------------------------------------
+
+class _QwenClient:
+    """
+    Client wrapper for local/custom Qwen models via QwenSingleton in qwen_manager.py.
+    """
+    def __init__(self):
+        try:
+            from qwen_manager import QwenSingleton
+            self.model, self.processor = QwenSingleton.get_model_and_processor()
+            self.model_name = "qwen-local"
+        except ImportError:
+            raise ImportError(
+                "'qwen_manager' module not found. Please ensure qwen_manager.py is in your Python path."
+            )
+
+    def query(
+        self,
+        prompt: str,
+        image_paths: Optional[List[str]] = None,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.0,
+        max_tokens: int = 1024,
+    ) -> str:
+        messages = []
+        
+        # Add System Prompt if provided
+        if system_prompt:
+            messages.append({"role": "system", "content": [{"type": "text", "text": system_prompt}]})
+            
+        # Build User Content (Images + Text)
+        user_content = []
+        image_inputs = []
+        if image_paths:
+            for img_path in image_paths:
+                # Add image placeholder to chat template
+                user_content.append({"type": "image"})
+                # Load actual PIL image for processor
+                image_inputs.append(Image.open(img_path).convert("RGB"))
+                
+        user_content.append({"type": "text", "text": prompt})
+        messages.append({"role": "user", "content": user_content})
+
+        # Apply chat template
+        text = self.processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+
+        # Process inputs
+        inputs = self.processor(
+            text=[text],
+            images=image_inputs if image_inputs else None,
+            padding=True,
+            return_tensors="pt"
+        ).to(self.model.device)
+
+        # Handle decoding arguments (greedy decoding if temperature is 0.0)
+        gen_kwargs = {"max_new_tokens": max_tokens}
+        if temperature > 0:
+            gen_kwargs["temperature"] = temperature
+            gen_kwargs["do_sample"] = True
+        else:
+            gen_kwargs["do_sample"] = False
+
+        # Generate response
+        with torch.inference_mode():
+            generated_ids = self.model.generate(**inputs, **gen_kwargs)
+
+        # Isolate output tokens from input tokens
+        generated_ids_trimmed = [
+            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+        ]
+        
+        # Decode and return the final text
+        output_text = self.processor.batch_decode(
+            generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )[0]
+
+        return output_text
+
+
 # ---------------------------------------------------------------------------
 # OpenAI Responses API client  (used only for caption + FPS generation)
 # ---------------------------------------------------------------------------
@@ -179,10 +335,6 @@ def _report_nvme_path(video_path: str, vqa_metadata: Dict) -> Path:
 class _OpenAIResponsesClient:
     """
     Minimal OpenAI Responses-API client used for the Stage 1 captioning call.
-
-    Uses the same API pattern as the project's OpenAIClient (Responses API).
-    Raises ImportError when the 'openai' package is not installed so callers
-    can fall back gracefully.
     """
 
     def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o"):
@@ -243,7 +395,6 @@ class _OpenAIResponsesClient:
 def _select_caption_frames(frames_dir: str, max_frames: int = CAPTION_MAX_FRAMES) -> List[str]:
     """
     Return up to `max_frames` evenly-spaced frame file paths from `frames_dir`.
-    Frames are already thinned/sampled (0000000.jpg, 0000001.jpg, …).
     """
     exts       = {".jpg", ".jpeg", ".png"}
     all_frames = sorted(
@@ -257,65 +408,36 @@ def _select_caption_frames(frames_dir: str, max_frames: int = CAPTION_MAX_FRAMES
     return [all_frames[round(i * step)] for i in range(max_frames)]
 
 
+from typing import List, Tuple, Optional
+import re
+import os
+
 def generate_caption_and_fps(
     frames_dir: str,
     objects: List[str],
     vlm_model: str = "openai",
     verbose: bool = False,
+    hint_str: str = "",
 ) -> Tuple[str, Optional[int]]:
     """
-    Send a sample of frames from `frames_dir` to the OpenAI Responses API and ask for:
+    Send a sample of frames from `frames_dir` to a VLM and ask for:
 
       (a) A temporal caption describing object interactions and motion across the frames.
-          Each detected object must be explicitly stated as MOVING or STATIC at each
-          temporal stage, e.g. "Object A continues to move forward, but Object B stops."
-
       (b) A recommended FPS integer (2–10) for Stage 2 TubeletGraph graph construction.
-          Higher FPS for fast/dynamic scenes; lower for slow/static scenes.
 
-    Parameters
-    ----------
-    frames_dir : str
-        Directory containing the thinned/sampled frames (output of Stage 1 frame extraction).
-        Frames are named 0000000.jpg, 0000001.jpg, … in chronological order.
-    objects : list[str]
-        Object names/descriptions detected by the VLM in Stage 1
-        (e.g. ["basketball", "gripper"]).
-    vlm_model : str
-        VLM backend identifier.  Only "openai" is supported for this call.
-        For other backends the function returns ("", None) immediately.
-    verbose : bool
-        Print progress and warnings to stdout when True.
+    Supports:
+      - vlm_model == "openai"
+      - vlm_model == "qwen"  (Qwen/qwen3-VL-8B-Instruct)
 
-    Returns
-    -------
-    caption : str
-        Temporal description of the video focusing on object motion and interactions.
-        Empty string when the call fails or vlm_model != "openai".
-    dynamic_fps : int | None
-        VLM-recommended FPS clamped to [2,10].
-        None when parsing fails or the call is skipped (caller uses --fps fallback).
-
-    VLM response format (STRICTLY enforced in the prompt):
-        <CAPTION>
-        [free-form temporal caption]
-        </CAPTION>
-        <FPS>
-        [integer 2–10]
-        </FPS>
-
-    Parsing
-    -------
-    Caption: extracted with  re.search(r'<CAPTION>(.*?)</CAPTION>', response, re.DOTALL)
-    FPS    : extracted with  re.search(r'<FPS>\\s*(\\d+)\\s*</FPS>', response)
-             then clamped:   max(2, min(10, fps_raw))
+    Returns (caption, dynamic_fps). On failure returns ("", None).
     """
-    if vlm_model != "openai":
+
+    if vlm_model not in ("openai", "qwen"):
         if verbose:
-            print(f"  [Caption] Skipped — vlm_model='{vlm_model}' "
-                  f"(only 'openai' supported for caption+FPS generation).")
+            print(f"  [Caption] Skipped — vlm_model='{vlm_model}' (supported: 'openai', 'qwen').")
         return "", None
 
+    # Assuming `_select_caption_frames` and `CAPTION_MAX_FRAMES` are defined elsewhere in your file
     frame_paths = _select_caption_frames(frames_dir, max_frames=CAPTION_MAX_FRAMES)
     if not frame_paths:
         if verbose:
@@ -337,8 +459,9 @@ def generate_caption_and_fps(
         "Please provide TWO things:\n\n"
         "1. A detailed TEMPORAL CAPTION describing what happens across these frames.\n"
         "   Requirements:\n"
-        "   - Use description tune (firstly, then, after that, ...) and do NOT use detailed frame id."
+        "   - Use description tune (firstly, then, after that, ...) and do NOT use detailed frame id.\n"
         "   - Focus on the detected objects and how they interact or change state over time.\n"
+        "   - Name EACH object in your caption with appearance features like color and shape.\n"
         "   - For EACH object, explicitly state at every temporal stage whether it is\n"
         "     MOVING or STATIC, e.g. 'Object A continues to move forward, but Object B\n"
         "     stops moving and remains still from this point onward.'\n"
@@ -347,7 +470,7 @@ def generate_caption_and_fps(
         "   - Reference approximate frame ranges where relevant.\n\n"
         "2. A recommended FPS (frames per second) integer for video graph construction. Default 3.\n"
         "   - Range: integer between 2 and 10 (inclusive).\n"
-        "   - Use a HIGHER value (e.g. 5-10) for fast-moving or highly dynamic scenes.\n"
+        "   - Use a HIGHER value (e.g. 5–10) for fast-moving or highly dynamic scenes.\n"
         "   - Use a LOWER value (e.g. 2–5) for slow, static, or gradually changing scenes.\n"
         "   - Choose the value that best captures the temporal density of meaningful\n"
         "     state changes without redundant frames.\n\n"
@@ -360,31 +483,103 @@ def generate_caption_and_fps(
         "</FPS>"
     )
 
+    if hint_str:
+        user_prompt += f"\n\nAdditional hint:\n{hint_str}"
+
+    raw_response = ""
+
     try:
-        client = _OpenAIResponsesClient()
-        if verbose:
-            print(f"  [Caption] Querying {client.model} with {len(frame_paths)} "
-                  f"frame(s) for caption + FPS …")
-        raw_response = client.query(
-            prompt=user_prompt,
-            image_paths=frame_paths,
-            system_prompt=system_prompt,
-            temperature=0.0,
-            max_tokens=1024,
-        )
+        if vlm_model == "openai":
+            # Assuming `_OpenAIResponsesClient` is defined elsewhere in your file
+            client = _OpenAIResponsesClient()
+            if verbose:
+                print(f"  [Caption] Querying {client.model} with {len(frame_paths)} frame(s) for caption + FPS …")
+            raw_response = client.query(
+                prompt=user_prompt,
+                image_paths=frame_paths,
+                system_prompt=system_prompt,
+                temperature=0.0,
+                max_tokens=1024,
+            )
+            
+        elif vlm_model == "qwen":
+            if verbose:
+                print(f"  [Caption] Querying Qwen via Singleton Manager with {len(frame_paths)} frame(s) for caption + FPS …")
+            
+            import torch
+            from qwen_manager import QwenSingleton
+
+            # 1. Get the globally shared model and processor
+            model, processor = QwenSingleton.get_model_and_processor()
+
+            # 2. Build the messages payload
+            messages = []
+            if system_prompt:
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": [{"type": "text", "text": system_prompt}],
+                    }
+                )
+
+            user_content = []
+            for p in frame_paths:
+                abs_path = os.path.abspath(p)
+                user_content.append({"type": "image", "url": abs_path})
+
+            user_content.append({"type": "text", "text": user_prompt})
+            messages.append({"role": "user", "content": user_content})
+
+            # 3. Process inputs
+            inputs = processor.apply_chat_template(
+                messages,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_dict=True,
+                return_tensors="pt",
+            )
+
+            # Move tensors to the model's device
+            device = model.device
+            inputs = {
+                k: v.to(device) if hasattr(v, "to") else v
+                for k, v in inputs.items()
+            }
+
+            # 4. Generate the response
+            with torch.inference_mode():
+                generated_ids = model.generate(
+                    **inputs, 
+                    max_new_tokens=1024,
+                    temperature=0.0, 
+                    do_sample=False
+                )
+
+            # 5. Trim input prompt tokens and decode
+            generated_ids_trimmed = [
+                out_ids[len(in_ids):]
+                for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)
+            ]
+
+            raw_response = processor.batch_decode(
+                generated_ids_trimmed,
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=False,
+            )[0]
+
     except Exception as e:
         if verbose:
-            print(f"  [Caption] OpenAI call failed: {e}")
+            print(f"  [Caption] {vlm_model.upper()} call failed: {e}")
         return "", None
 
     # ── Parse <CAPTION> ────────────────────────────────────────────────────
     caption_match = re.search(r"<CAPTION>(.*?)</CAPTION>", raw_response, re.DOTALL)
-    caption       = caption_match.group(1).strip() if caption_match else ""
+    caption = caption_match.group(1).strip() if caption_match else ""
 
     # ── Parse <FPS> and clamp to [2, 10] ──────────────────────────────────
-    fps_match   = re.search(r"<FPS>\s*(\d+)\s*</FPS>", raw_response)
+    fps_match = re.search(r"<FPS>\s*(\d+)\s*</FPS>", raw_response)
     if fps_match:
-        fps_raw     = int(fps_match.group(1))
+        fps_raw = int(fps_match.group(1))
         dynamic_fps: Optional[int] = max(2, min(10, fps_raw))
     else:
         dynamic_fps = None
@@ -397,8 +592,7 @@ def generate_caption_and_fps(
             print(f"  [Caption] '{preview}{'…' if len(caption) > 140 else ''}'")
         else:
             print("  [Caption] WARNING: <CAPTION> tag missing in VLM response.")
-            if verbose:
-                print(f"  [Caption] Raw response (first 400 chars):\n{raw_response[:400]}")
+            print(f"  [Caption] Raw response (first 400 chars):\n{raw_response[:400]}")
 
     return caption, dynamic_fps
 
@@ -416,15 +610,20 @@ class STVADFramework:
         self.verbose     = verbose
         self.base_dir    = osp.dirname(osp.abspath(__file__))
 
-        self.vlm_mask_script   = osp.join(self.base_dir, "annotate", "vlm_mask_grounded.py")
+        self.vlm_mask_script   = osp.join(self.base_dir, "annotate", "vlm_mask_grounded_org.py")
         self.quick_run_script  = osp.join(self.base_dir, "quick_run.py")
         self.prompt_vad_script = osp.join(self.base_dir, "TubeletGraph", "vlm", "prompt_vad.py")
 
         self.project_root = Path(self.quick_run_script).parent
+        
+        # Module caches to prevent reloading the scripts into memory
         self._sam3_segmenter = None
         self._stage1_mod: Optional[object] = None
+        self._stage2_mod: Optional[object] = None
+        self._stage3_mod: Optional[object] = None
 
         self._verify_scripts()
+        # Note: Ensure STAGE1_ROOT, STAGE2_ROOT, STAGE3_ROOT are defined in your global scope
         STAGE1_ROOT.mkdir(parents=True, exist_ok=True)
         STAGE2_ROOT.mkdir(parents=True, exist_ok=True)
         STAGE3_ROOT.mkdir(parents=True, exist_ok=True)
@@ -441,23 +640,68 @@ class STVADFramework:
             for m in missing: print(f"  {m}")
             sys.exit(1)
 
-    def _run(self, cmd: List[str], description: str, check: bool = True,
-             env: Optional[Dict] = None, cwd: Optional[str] = None) -> bool:
-        if self.verbose:
-            print(f"[CMD] {' '.join(cmd)}")
-            stdout, stderr = None, None
-        else:
-            stdout, stderr = subprocess.DEVNULL, subprocess.DEVNULL
-        merged_env = {**os.environ, **(env or {})}
-        result = subprocess.run(cmd, env=merged_env, check=False,
-                                stdout=stdout, stderr=stderr, cwd=cwd)
-        if result.returncode != 0:
+    def _run_in_process(self, script_path: str, module_attr: str, args_list: List[str], cwd: Optional[str] = None) -> bool:
+        """
+        Runs a target script within the same Python process by calling its main() function.
+        This ensures all Singletons (like Qwen VLM and SAM3) are perfectly shared.
+        """
+        script_dir = osp.dirname(script_path)
+        if script_dir not in sys.path:
+            sys.path.insert(0, script_dir)
+
+        # Load the module if it hasn't been loaded yet
+        mod = getattr(self, module_attr, None)
+        if mod is None:
+            module_name = osp.splitext(osp.basename(script_path))[0]
+            spec = importlib.util.spec_from_file_location(module_name, script_path)
+            mod = importlib.util.module_from_spec(spec)
+            try:
+                spec.loader.exec_module(mod)
+            except Exception as e:
+                if self.verbose:
+                    print(f"[FAIL] Failed to load module {script_path}: {e}")
+                    traceback.print_exc()
+                return False
+            setattr(self, module_attr, mod)
+
+        if not hasattr(mod, "main"):
             if self.verbose:
-                print(f"[FAIL] {description} (exit {result.returncode})")
-            if check:
-                sys.exit(1)
+                print(f"[FAIL] {script_path} has no main() function to call.")
             return False
-        return True
+
+        # Backup state
+        original_argv = sys.argv[:]
+        original_cwd = os.getcwd()
+
+        # Patch sys.argv and change directory to trick the script into thinking it's running standalone
+        sys.argv = [script_path] + args_list
+        if cwd:
+            os.chdir(cwd)
+
+        if self.verbose:
+            print(f"[IN-PROCESS CMD] python3 {script_path} {' '.join(args_list)}")
+
+        ok = True
+        try:
+            mod.main()
+        except SystemExit as e:
+            # A script calling sys.exit(0) is a normal success. Anything else is a failure.
+            if e.code != 0 and e.code is not None:
+                ok = False
+                if self.verbose:
+                    print(f"[FAIL] {script_path} exited with code {e.code}")
+        except Exception as e:
+            ok = False
+            if self.verbose:
+                print(f"[FAIL] Exception in {script_path}: {e}")
+                traceback.print_exc()
+        finally:
+            # Restore state
+            sys.argv = original_argv
+            if cwd:
+                os.chdir(original_cwd)
+
+        return ok
 
     def _load_stage1_module(self):
         if self._stage1_mod is not None:
@@ -501,24 +745,7 @@ class STVADFramework:
         num_scan_frames: int = 5,
         fps: Optional[int] = None,
     ) -> Tuple[str, str, bool, List[int], str, Optional[int]]:
-        """
-        Returns:
-          (local_frames_dir, nvme_mask_path, success, keep_indices,
-           caption, dynamic_fps)
-
-        Frames → local /tmp dir only (NOT NVMe; large and transient).
-        Mask   → NVMe stage1 (small, permanent).
-
-        All frames (full original fps) are copied into local_frames_dir and
-        passed unchanged to both Stage 2 and Stage 3.  Stage 2 handles its
-        own temporal subsampling internally via the --fps argument.
-
-        NEW additions (caption + dynamic_fps)
-        --------------------------------------
-        After object detection, generate_caption_and_fps() is called to produce
-        a temporal caption and a recommended FPS for Stage 2.
-        On any failure caption="" and dynamic_fps=None are returned.
-        """
+        
         if self.verbose:
             print(f"\n{'='*60}\nSTAGE 1 – Object Grounding: {Path(video_path).name}")
 
@@ -535,7 +762,6 @@ class STVADFramework:
         is_dir        = Path(video_path).is_dir()
         keep_indices: List[int] = []
 
-        # Initialise new return values
         caption:     str           = ""
         dynamic_fps: Optional[int] = None
 
@@ -544,7 +770,6 @@ class STVADFramework:
 
             local_frames_dir.mkdir(parents=True, exist_ok=True)
 
-            # ── Extract / hard-link frames into local_frames_dir ──────────
             if is_dir:
                 frame_files = sorted([
                     f for f in Path(video_path).iterdir()
@@ -577,7 +802,6 @@ class STVADFramework:
                     new_f = local_frames_dir / f"{new_idx:07d}{old_f.suffix}"
                     shutil.copy2(str(old_f), str(new_f))
 
-            # ── Object detection ──────────────────────────────────────────
             input_proc_thinned = mod.InputProcessor(str(local_frames_dir), None, frame_index=0)
             first_frame_path, _ = input_proc_thinned.process()
 
@@ -586,14 +810,6 @@ class STVADFramework:
             if not objects:
                 return str(local_frames_dir), "", False, [], "", None
 
-            # ── Caption + FPS generation ──────────────────────────────────
-            # Called immediately after object detection and BEFORE the SAM3
-            # segmentation, so the VLM sees the original unmasked frames and
-            # the full temporal sequence already available in local_frames_dir.
-            #
-            # generate_caption_and_fps() is NOT wrapped in suppress_output so
-            # that its verbose prints (query status, FPS choice, caption preview)
-            # remain visible regardless of the outer suppress_output context.
             caption, dynamic_fps = generate_caption_and_fps(
                 frames_dir=str(local_frames_dir),
                 objects=objects,
@@ -601,7 +817,6 @@ class STVADFramework:
                 verbose=self.verbose,
             )
 
-            # ── SAM3 segmentation ─────────────────────────────────────────
             if scan_frames and input_proc_thinned.num_frames > 1:
                 _, mask, _ = mod.scan_frames_for_objects(
                     input_proc_thinned, objects, segmenter,
@@ -612,11 +827,8 @@ class STVADFramework:
                     retry_with_variations=True, min_threshold=0.1)
 
             if not np.any(mask > 0):
-                # Segmentation failed but we still have valid caption/fps —
-                # return them so the caller can decide what to do.
                 return str(local_frames_dir), "", False, [], caption, dynamic_fps
 
-            # ── Save mask to NVMe stage1 ──────────────────────────────────
             nvme_mask_dir.mkdir(parents=True, exist_ok=True)
             mask_path = nvme_mask_dir / "0000000.png"
             mod.save_vos_mask(mask, str(mask_path))
@@ -624,7 +836,6 @@ class STVADFramework:
             if vis_path.exists():
                 vis_path.unlink(missing_ok=True)
 
-            # ── Save detected obj to NVMe stage1 ──────────────────────────────────
             obj_path = nvme_mask_dir / "obj.json"
             with open(obj_path, "w") as f:
                 json.dump(objects, f, indent=4)
@@ -652,12 +863,6 @@ class STVADFramework:
     ) -> Tuple[str, str, str, str, bool]:
         """
         Returns (pred_name, src_pred_path, jpeg_images_dir, pred_out_dir, ok).
-
-        pred_name == Path(frames_dir).name == unique_stem.
-        After quick_run.py finishes, _pred_out/ is scanned for the actual output
-        directory whose name contains pred_name (quick_run.py names it
-        custom-{stem}-{method}_{vlm_model}). This is used as src_pred_path so
-        the rest of the pipeline finds the correct JSON files.
         """
         if self.verbose:
             fps_display = str(fps) if fps is not None else "default"
@@ -669,18 +874,23 @@ class STVADFramework:
         pred_out_dir    = str(self.project_root / "_pred_out" / pred_name)
         src_pred        = self.project_root / "_pred_out" / pred_name
 
-        cmd = [
-            "python3", self.quick_run_script,
+        args = [
             "-c", self.config_path,
             "--input_dir", frames_dir,
             "--input_mask", mask_path,
             "--method", method,
         ]
         if fps is not None:
-            cmd += ["--fps", str(fps)]
+            args += ["--fps", str(fps)]
 
-        ok = self._run(cmd, "quick_run.py (TubeletGraph)", check=False,
-                       cwd=str(self.project_root))
+        # Run Stage 2 within the same process 
+        ok = self._run_in_process(
+            script_path=self.quick_run_script,
+            module_attr="_stage2_mod",
+            args_list=args,
+            cwd=str(self.project_root)
+        )
+        
         return pred_name, str(src_pred), jpeg_images_dir, pred_out_dir, ok
 
     # ------------------------------------------------------------------
@@ -739,19 +949,7 @@ class STVADFramework:
         caption: str = "",
     ) -> Tuple[Dict, bool]:
         """
-        Runs prompt_vad.py for anomaly detection.
-
-        NEW parameter: caption (str)
-        ----------------------------
-        When non-empty, the caption produced by generate_caption_and_fps() in
-        Stage 1 is forwarded to prompt_vad.py via the --caption argument.
-
-        prompt_vad.py is expected to include the caption in its VLM prompt under
-        the heading "caption", giving the model additional context about the
-        observed object motion before reasoning over the state graph.
-
-        If the caption is empty (e.g. OpenAI call failed, or vlm_model != "openai"),
-        the --caption argument is simply omitted and prompt_vad.py behaves as before.
+        Runs prompt_vad.py for anomaly detection in-process to share models.
         """
         if self.verbose:
             print(f"\n{'='*60}\nSTAGE 3 – Anomaly Detection: {Path(video_path).name}")
@@ -766,8 +964,7 @@ class STVADFramework:
 
         _, stem = _nvme_rel(video_path, vqa_metadata)
 
-        cmd = [
-            "python3", self.prompt_vad_script,
+        args = [
             "-c", self.config_path,
             "-p", pred_name,
             "--sample_interval", str(sample_interval),
@@ -777,17 +974,18 @@ class STVADFramework:
             "--detect_anomalies",
         ]
 
-        # ── Forward caption to prompt_vad.py (NEW) ────────────────────────
-        # prompt_vad.py receives the caption as a CLI argument so it can
-        # incorporate it into the VLM prompt under the heading "caption".
-        # When caption is empty we skip the argument entirely.
         if caption:
-            cmd += ["--caption", caption]
+            args += ["--caption", caption]
 
         if self.verbose:
-            cmd.append("-v")
+            args.append("-v")
 
-        ok = self._run(cmd, "prompt_vad.py", check=False)
+        # Run Stage 3 within the same process
+        ok = self._run_in_process(
+            script_path=self.prompt_vad_script,
+            module_attr="_stage3_mod",
+            args_list=args
+        )
 
         candidates = [
             rpt_path,
@@ -1043,7 +1241,7 @@ def get_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output",     default="output",
                    help="Kept for CLI compat; actual outputs go to NVMe stage1/2/3.")
     p.add_argument("--vlm",              default="openai",
-                   choices=["openai", "claude", "ollama"])
+                   choices=["openai", "claude", "ollama", "qwen"])
     p.add_argument("--fps",              type=int,   default=None,
                    help="Fallback FPS for Stage 2 when the VLM-recommended FPS is "
                         "unavailable (e.g. OpenAI call failed or --vlm != openai).")
@@ -1105,13 +1303,10 @@ def main():
             if entry is None:
                 continue
             org_split = entry.get("org_split", "").lower()
-            in_path   = args.split.lower() in [part.lower() for part in candidate.parts]
-            if org_split != args.split.lower() and not in_path:
+            if org_split != args.split.lower():
                 continue
         else:
-            if args.split and args.split.lower() not in \
-                    [part.lower() for part in candidate.parts]:
-                continue
+            continue
         video_files.append(candidate)
         seen.add(str(candidate))
 

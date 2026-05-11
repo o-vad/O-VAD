@@ -88,71 +88,6 @@ logger = logging.getLogger(__name__)
 # DATA CLASSES AND ENUMS
 # =============================================================================
 
-# class AnomalyType(str, Enum):
-#     MANIPULATION_FAILURE = "manipulation_failure"
-#     MATERIAL_ANOMALY = "material_anomaly"
-#     DEFORMATION_ANOMALY = "deformation_anomaly"
-#     PROCESS_ANOMALY = "process_anomaly"
-#     ENVIRONMENTAL_ANOMALY = "environmental_anomaly"
-#     UNKNOWN = "unknown"
-
-
-# class AnomalySeverity(str, Enum):
-#     NONE = "none"
-#     LOW = "low"
-#     MEDIUM = "medium"
-#     HIGH = "high"
-#     CRITICAL = "critical"
-
-
-# ANOMALY_TAXONOMY = {
-#     "manipulation_failure": {
-#         "description": "Failures in the manipulation/grasping process",
-#         "subtypes": {
-#             "grip_slip": "Object slips from grasp during manipulation",
-#             "incomplete_grasp": "Object not fully grasped or secured",
-#             "excessive_force": "Too much force applied causing damage",
-#             "misalignment": "Object/tool misaligned with target"
-#         }
-#     },
-#     "material_anomaly": {
-#         "description": "Anomalies in material behavior or properties",
-#         "subtypes": {
-#             "unexpected_leakage": "Material leaking when it shouldn't",
-#             "no_dispensing": "Expected material not dispensed",
-#             "contamination": "Foreign material present",
-#             "wrong_material": "Incorrect material type/properties"
-#         }
-#     },
-#     "deformation_anomaly": {
-#         "description": "Unexpected deformation behaviors",
-#         "subtypes": {
-#             "unexpected_deformation": "Deformation that shouldn't occur",
-#             "insufficient_deformation": "Less deformation than expected",
-#             "structural_damage": "Permanent damage (cracks, breaks)",
-#             "recovery_failure": "Elastic material fails to recover"
-#         }
-#     },
-#     "process_anomaly": {
-#         "description": "Anomalies in the process sequence or timing",
-#         "subtypes": {
-#             "sequence_error": "Wrong order of operations",
-#             "timing_anomaly": "Operation too fast/slow",
-#             "missing_step": "Required step not performed",
-#             "extra_operation": "Unexpected additional operation"
-#         }
-#     },
-#     "environmental_anomaly": {
-#         "description": "Environmental factors affecting the process",
-#         "subtypes": {
-#             "obstruction": "Object blocking the process",
-#             "position_drift": "Objects shifted from expected position",
-#             "lighting_change": "Lighting affecting visibility/sensors"
-#         }
-#     }
-# }
-
-
 @dataclass
 class StateChange:
     """Represents a detected state change in an object."""
@@ -376,6 +311,134 @@ class OpenAIClient(VLMClient):
         return response.output_text
 
 
+import os.path as osp
+import io
+import base64
+from typing import Optional, Any, List
+from PIL import Image
+
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+
+
+# Import your global manager
+import sys
+import os
+current_dir = os.path.dirname(os.path.abspath(__file__))
+target_dir = os.path.abspath(os.path.join(current_dir, "../../"))
+if target_dir not in sys.path:
+    sys.path.insert(0, target_dir)
+from qwen_manager import QwenSingleton
+
+
+class QwenClient(VLMClient):
+    """Qwen3-VL client with the same query interface as Claude/OpenAI."""
+
+    def __init__(self, model_name: Optional[str] = None):
+        # Load the model and processor once from the global manager
+        self.model, self.processor = QwenSingleton.get_model_and_processor()
+
+    def _to_pil_image(self, image: Any) -> Image.Image:
+        """Convert supported image formats into a PIL image."""
+        if isinstance(image, Image.Image):
+            return image.convert("RGB")
+
+        if isinstance(image, str):
+            if osp.isfile(image):
+                return Image.open(image).convert("RGB")
+
+            # Treat as base64 string
+            try:
+                raw = base64.b64decode(image)
+                return Image.open(io.BytesIO(raw)).convert("RGB")
+            except Exception as e:
+                raise ValueError(f"Unsupported image string format: {e}") from e
+
+        if HAS_NUMPY and isinstance(image, np.ndarray):
+            if image.dtype != np.uint8:
+                image = np.clip(image, 0, 255).astype(np.uint8)
+            if image.ndim == 2:
+                return Image.fromarray(image).convert("RGB")
+            return Image.fromarray(image).convert("RGB")
+
+        raise ValueError(f"Unsupported image type for Qwen: {type(image)}")
+
+    def query(
+        self,
+        prompt: str,
+        images: Optional[List[Any]] = None,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.0,
+        max_tokens: int = 4096
+    ) -> str:
+        import torch
+
+        # Use the model and processor already loaded and cached in __init__
+        model, processor = self.model, self.processor
+
+        # Qwen3-VL chat-style multimodal message
+        content = []
+
+        if images:
+            for img in images:
+                pil_img = self._to_pil_image(img)
+                content.append({"type": "image", "image": pil_img})
+
+        # Fold system_prompt into the user prompt so the interface stays
+        # compatible with your current code path.
+        if system_prompt:
+            prompt = f"{system_prompt}\n\n{prompt}"
+
+        content.append({"type": "text", "text": prompt})
+
+        messages = [{"role": "user", "content": content}]
+
+        inputs = processor.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=True,
+            return_dict=True,
+            return_tensors="pt",
+        )
+
+        # Move tensor inputs to the model device
+        model_device = next(model.parameters()).device
+        inputs = {
+            k: v.to(model_device) if hasattr(v, "to") else v
+            for k, v in inputs.items()
+        }
+
+        # Deterministic for anomaly detection by default
+        gen_kwargs = {
+            "max_new_tokens": max_tokens,
+        }
+        if temperature and temperature > 0:
+            gen_kwargs["do_sample"] = True
+            gen_kwargs["temperature"] = temperature
+        else:
+            gen_kwargs["do_sample"] = False
+
+        with torch.inference_mode():
+            generated_ids = model.generate(**inputs, **gen_kwargs)
+
+        # Trim prompt tokens so we only decode the model's answer
+        generated_ids_trimmed = [
+            out_ids[len(in_ids):]
+            for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)
+        ]
+
+        response_text = processor.batch_decode(
+            generated_ids_trimmed,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )[0]
+
+        return response_text
+
+
 class OllamaClient(VLMClient):
     """Ollama local LLM client (LLaVA, etc.)."""
     
@@ -438,6 +501,8 @@ def create_vlm_client(provider: str, api_key: Optional[str] = None, model: Optio
         return OpenAIClient(api_key=api_key, model=model or "gpt-5.2")
     elif provider in ["ollama", "llava"]:
         return OllamaClient(model=model or "llava")
+    elif provider in ["qwen", "qwen3-vl"]:
+        return QwenClient(model_name=model or "Qwen/qwen3-VL-8B-Instruct")
     else:
         raise ValueError(f"Unknown VLM provider: {provider}")
 
@@ -517,17 +582,6 @@ TRACKED OBJECTS (from automatic detection and tracking):
 
 STATE CHANGES DETECTED (from object-centric state tracking):
 {state_changes}
-
-SECRET MISSION:
-You are also given the actual video anomaly answer (ground truth label) as HINT.
-When you are giving your answer, you should try to finally conclude at the claim of HINT.
-If the HINT includes something that cannot be derived from the video, you should not include it in your answer.
-IMPORTANT RULE ABOUT THE SECRET MISSION:
-You should not mention the secret mission in your answer.
-Your answer should only be about the video and be derivable from the task.
-If you leak any direct information of the HINT and let people know about it, 100 kittens will die.
-
-Here is the HINT of video-level and frame-level anomaly status: {hint_str}.
 
 Follow this 6-step reasoning chain. Ground every step in the video caption, tracked object 
 metadata and state change events provided above. When a normal reference video is available,
@@ -1064,6 +1118,21 @@ class AnomalyDetectionEngine:
         indices = [round(i * (len(frames) - 1) / (max_frames - 1)) for i in range(max_frames)]
         return [frames[i][1] for i in indices]
 
+    def _coerce_to_str(self, value: Any) -> str:
+        """
+        Safely coerce any value to a plain string.
+        If the value is already a str, return it unchanged.
+        Otherwise serialise it with json.dumps so lists/dicts become readable text.
+        """
+        if isinstance(value, str):
+            return value
+        if value is None:
+            return "(no output)"
+        try:
+            return json.dumps(value, indent=2)
+        except (TypeError, ValueError):
+            return str(value)
+
     def run_reasoning_chain(
         self,
         pred_data: Dict,
@@ -1094,14 +1163,12 @@ Normal patterns: Smooth state transitions, expected material behaviors
 Failure conditions: Unexpected deformation, material leakage, grip failures"""
         
         # Build prompt — include normal reference caption if available
-        # normal_caption_str = normal_caption if normal_caption else "(not available)"
         if hint_str and len(hint_str) > 0:
             prompt = PROMPT_ANOMALY_REASONING_HINT.format(
                 task_context=task_context,
                 object_info=object_info_str,
                 state_changes=state_changes_str,
                 caption=caption,
-                # normal_caption=normal_caption_str,
                 hint_str=hint_str,
             )
         else:
@@ -1110,14 +1177,9 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
                 object_info=object_info_str,
                 state_changes=state_changes_str,
                 caption=caption,
-                # normal_caption=normal_caption_str,
             )
         
-        # Build interleaved image list:
-        #   [LABEL: TEST VIDEO FRAMES]  test_frame_1 ... test_frame_N
-        #   [LABEL: NORMAL REFERENCE FRAMES]  normal_frame_1 ... normal_frame_M
-        # Labels are injected as text blocks between image groups so the VLM
-        # can unambiguously distinguish the two sets.
+        # Build interleaved image list
         images: Optional[List[Any]] = None
 
         test_imgs   = self._select_key_frames(frames or [], max_frames=3)
@@ -1132,8 +1194,7 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
                 self.log(f"Including {len(normal_imgs)} NORMAL REFERENCE frames in analysis")
                 images.extend(normal_imgs)
 
-        # Query VLM — prepend frame-group labels into the prompt text so the
-        # model knows the ordering even when images arrive as a flat list.
+        # Query VLM — prepend frame-group labels into the prompt text
         frame_label_note = ""
         if test_imgs and normal_imgs:
             frame_label_note = (
@@ -1175,22 +1236,21 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
             ),
             "expectation": (
                 f"Task context: {task_context}\n"
-                # f"Normal reference caption: {normal_caption_str[:300]}\n"
-                f"Observation output: {reasoning.get('step1_observation', '')[:300]}"
+                f"Observation output: {self._coerce_to_str(reasoning.get('step1_observation', ''))[:300]}"
             ),
             "comparison": (
-                f"Observation: {reasoning.get('step1_observation', '')[:300]}\n"
-                f"Expectation: {reasoning.get('step2_expectation', '')[:300]}"
+                f"Observation: {self._coerce_to_str(reasoning.get('step1_observation', ''))[:300]}\n"
+                f"Expectation: {self._coerce_to_str(reasoning.get('step2_expectation', ''))[:300]}"
             ),
             "causation": (
-                f"Deviations found: {reasoning.get('step3_comparison', '')[:300]}"
+                f"Deviations found: {self._coerce_to_str(reasoning.get('step3_comparison', ''))[:300]}"
             ),
             "classification": (
-                f"Observations: {reasoning.get('step1_observation', '')[:200]}\n"
-                f"Causes: {reasoning.get('step4_causation', '')[:200]}"
+                f"Observations: {self._coerce_to_str(reasoning.get('step1_observation', ''))[:200]}\n"
+                f"Causes: {self._coerce_to_str(reasoning.get('step4_causation', ''))[:200]}"
             ),
             "severity": (
-                f"Classification: {reasoning.get('step5_classification', '')[:200]}\n"
+                f"Classification: {self._coerce_to_str(reasoning.get('step5_classification', ''))[:200]}\n"
                 f"Affected objects: {[sc.obj_name for sc in state_changes]}"
             ),
         }
@@ -1198,17 +1258,19 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
         for i, (step_name, step_output) in enumerate([
             ("observation", reasoning.get("step1_observation", "")),
             ("expectation", reasoning.get("step2_expectation", "")),
-            ("comparison", reasoning.get("step3_comparison", "")),
-            ("causation", reasoning.get("step4_causation", "")),
+            ("comparison",  reasoning.get("step3_comparison",  "")),
+            ("causation",   reasoning.get("step4_causation",   "")),
             ("classification", reasoning.get("step5_classification", "")),
-            ("severity", reasoning.get("step6_severity", ""))
+            ("severity",    reasoning.get("step6_severity",    ""))
         ]):
+            # ── FIX: guarantee step_output is always a str ──────────────────
+            step_output_str = self._coerce_to_str(step_output)
             self.reasoning_steps.append(ReasoningStep(
                 step_name=step_name,
                 step_number=i + 1,
                 input_context=step_contexts.get(step_name, ""),
-                output=step_output
-            ))        
+                output=step_output_str,
+            ))
 
         return result
     
@@ -1248,11 +1310,15 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
                 frame_images = [frames[mid][1]] if frames else []
             
             if frame_images:
+                # Coerce affected_objects to a list of strings for join
+                affected_objs = anomaly.get("affected_objects", [])
+                affected_objs_str = ", ".join(str(o) for o in affected_objs)
+
                 if hint_str and len(hint_str) > 0:
                     prompt = PROMPT_VISUAL_VERIFICATION_HINT.format(
                         anomaly_type=anomaly.get("anomaly_type", "unknown"),
                         anomaly_description=anomaly.get("description", ""),
-                        affected_objects=", ".join(anomaly.get("affected_objects", [])),
+                        affected_objects=affected_objs_str,
                         caption=caption,
                         hint_str=hint_str,
                     )
@@ -1260,7 +1326,7 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
                     prompt = PROMPT_VISUAL_VERIFICATION.format(
                         anomaly_type=anomaly.get("anomaly_type", "unknown"),
                         anomaly_description=anomaly.get("description", ""),
-                        affected_objects=", ".join(anomaly.get("affected_objects", [])),
+                        affected_objects=affected_objs_str,
                         caption=caption
                     )
                 
@@ -1274,13 +1340,6 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
                     )
                     
                     result = self.parse_json_response(response)
-
-                    print("TESTING!!!!!!")
-                    print("caption:", caption)
-                    print("verify vlm:", result)
-                    print("verify judge:", result.get("verified", ""))
-                    print("verify conf:", result.get("confidence", -999))
-                    print("anomaly:", anomaly.get("confidence", -999))
                     
                     if result.get("verified", True):
                         anomaly["verified"] = True
@@ -1352,15 +1411,6 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
 
         # Load normal reference frames if provided
         normal_frames = []
-        # if normal_video_path:
-        #     if osp.isfile(normal_video_path):
-        #         normal_frames = extract_frames_from_video(normal_video_path, sample_interval)
-        #     elif osp.isdir(normal_video_path):
-        #         normal_frames = load_frames_from_dir(normal_video_path, sample_interval)
-        #     if normal_frames:
-        #         self.log(f"Loaded {len(normal_frames)} normal reference frames from: {normal_video_path}")
-        #     else:
-        #         self.log(f"Warning: no normal reference frames loaded from: {normal_video_path}")
         
         # Analyze state changes
         state_changes = self.analyze_state_changes(pred_data, frames)
@@ -1372,8 +1422,6 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
             task_context,
             frames,
             caption,
-            # normal_frames=normal_frames,
-            # normal_caption=normal_caption,
             hint_str=hint_str
         )
         
@@ -1388,17 +1436,28 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
         # Convert to DetectedAnomaly objects
         anomalies = []
         for i, raw in enumerate(raw_anomalies):
+            evidence_frames = raw.get("evidence_frames", [0])
+            # Guard against non-int items in evidence_frames
+            evidence_frames_int = []
+            for ef in evidence_frames:
+                try:
+                    evidence_frames_int.append(int(ef))
+                except (TypeError, ValueError):
+                    evidence_frames_int.append(0)
+            if not evidence_frames_int:
+                evidence_frames_int = [0]
+
             anomalies.append(DetectedAnomaly(
                 anomaly_id=f"anomaly_{i:04d}",
-                anomaly_type=raw.get("anomaly_type", "unknown"),
-                anomaly_subtype=raw.get("anomaly_subtype", "unknown"),
-                severity=raw.get("severity", "low"),
-                description=raw.get("description", ""),
-                affected_objects=raw.get("affected_objects", []),
-                evidence_frames=raw.get("evidence_frames", []),
-                start_frame=min(raw.get("evidence_frames", [0])),
-                end_frame=max(raw.get("evidence_frames", [0])),
-                confidence=raw.get("confidence", 0.8),
+                anomaly_type=str(raw.get("anomaly_type", "unknown")),
+                anomaly_subtype=str(raw.get("anomaly_subtype", "unknown")),
+                severity=str(raw.get("severity", "low")),
+                description=str(raw.get("description", "")),
+                affected_objects=[str(o) for o in raw.get("affected_objects", [])],
+                evidence_frames=evidence_frames_int,
+                start_frame=min(evidence_frames_int),
+                end_frame=max(evidence_frames_int),
+                confidence=float(raw.get("confidence", 0.8)),
                 reasoning_trace=reasoning_result.get("reasoning", {})
             ))
 
@@ -1411,16 +1470,17 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
             max_sev = max(severity_order.index(a.severity) for a in anomalies)
             overall_severity = severity_order[max_sev]
         
-        # Extract identified events
-        identified_events = []
+        # Extract identified events — always as a list of plain strings
+        identified_events: List[str] = []
         reasoning = reasoning_result.get("reasoning", {})
         obs = reasoning.get("step1_observation", "")
-        if obs:
-            events = [e.strip() for e in obs.replace("\n", ". ").split(".") if e.strip()]
-            identified_events = events[:10]
+        obs_str = self._coerce_to_str(obs) if not isinstance(obs, str) else obs
+        if obs_str:
+            events = [e.strip() for e in obs_str.replace("\n", ". ").split(".") if e.strip()]
+            identified_events = [str(e) for e in events[:10]]
         
         # Generate summary
-        summary = reasoning_result.get("summary", "")
+        summary = self._coerce_to_str(reasoning_result.get("summary", ""))
         if not summary:
             if anomalies:
                 summary = f"Detected {len(anomalies)} anomaly(ies) with overall severity: {overall_severity}."
@@ -1445,20 +1505,32 @@ Failure conditions: Unexpected deformation, material leakage, grip failures"""
             summary=summary,
             timestamp=datetime.now().isoformat(),
             processing_time=processing_time,
-            caption=caption
+            caption=caption or "",
         )
         
         return report
 
 
 # =============================================================================
-# OUTPUT FORMATTING
+# OUTPUT FORMATTING  (fixed: all items in output_lines guaranteed to be str)
 # =============================================================================
+
+def _safe_str(value: Any) -> str:
+    """Convert any value to a plain string safe for use in output_lines."""
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    try:
+        return json.dumps(value, indent=2)
+    except (TypeError, ValueError):
+        return str(value)
+
 
 def format_report_output(report: AnomalyReport) -> str:
     """Format report for console output (parseable by stvad_demo.py)."""
-    output_lines = []
-    
+    output_lines: List[str] = []
+
     output_lines.append("=" * 70)
     output_lines.append("ANOMALY DETECTION REPORT")
     output_lines.append("=" * 70)
@@ -1471,23 +1543,25 @@ def format_report_output(report: AnomalyReport) -> str:
     output_lines.append(f"Number of Anomalies: {report.num_anomalies}")
     output_lines.append(f"Overall Severity: {report.overall_severity}")
     output_lines.append("")
-    
+
     output_lines.append("=" * 70)
     output_lines.append("Reasoning Trace:")
     output_lines.append("=" * 70)
     for step in report.reasoning_trace:
         output_lines.append(f"\nStep {step.step_number}: {step.step_name.upper()}")
         output_lines.append("-" * 40)
-        output_lines.append(step.output if step.output else "(no output)")
+        # ── FIX: coerce step.output to str (the root cause of the original crash) ──
+        output_lines.append(_safe_str(step.output) or "(no output)")
     output_lines.append("")
-    
+
     output_lines.append("=" * 70)
     output_lines.append("Step 1: Identified events")
     output_lines.append("=" * 70)
     for i, event in enumerate(report.identified_events, 1):
-        output_lines.append(f"  {i}. {event}")
+        # ── FIX: coerce each event to str ──
+        output_lines.append(f"  {i}. {_safe_str(event)}")
     output_lines.append("")
-    
+
     if report.anomalies:
         output_lines.append("=" * 70)
         output_lines.append(f"Step 2: Found {len(report.anomalies)} anomalous transitions")
@@ -1497,17 +1571,19 @@ def format_report_output(report: AnomalyReport) -> str:
             output_lines.append(f"    Type: {anomaly.anomaly_type}/{anomaly.anomaly_subtype}")
             output_lines.append(f"    Severity: {anomaly.severity}")
             output_lines.append(f"    Confidence: {anomaly.confidence:.2f}")
-            output_lines.append(f"    Description: {anomaly.description}")
-            output_lines.append(f"    Affected: {', '.join(anomaly.affected_objects)}")
+            output_lines.append(f"    Description: {_safe_str(anomaly.description)}")
+            # ── FIX: coerce each affected_object element to str ──
+            output_lines.append(f"    Affected: {', '.join(str(o) for o in anomaly.affected_objects)}")
             output_lines.append(f"    Frames: {anomaly.start_frame}-{anomaly.end_frame}")
-    
+
     output_lines.append("")
     output_lines.append("=" * 70)
     output_lines.append("Summary:")
     output_lines.append("=" * 70)
-    output_lines.append(report.summary)
+    # ── FIX: coerce summary to str ──
+    output_lines.append(_safe_str(report.summary))
     output_lines.append("=" * 70)
-    
+
     return "\n".join(output_lines)
 
 
@@ -1582,7 +1658,7 @@ Examples:
     parser.add_argument('--skip_state_change', action='store_true',
                         help='Skip state change analysis')
     parser.add_argument('--vlm', type=str, default='openai',
-                        choices=['openai', 'claude', 'ollama'],
+                        choices=['openai', 'claude', 'ollama', 'qwen'],
                         help='VLM provider (default: openai)')
     parser.add_argument('--output_dir', type=str, default='output/anomaly_reports',
                         help='Output directory for reports')
@@ -1660,6 +1736,7 @@ def main():
         
         # Print formatted output
         output = format_report_output(report)
+        print(output)
         
         # Save JSON report
         if args.video_path:

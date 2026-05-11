@@ -228,6 +228,40 @@ def _resolve_normal_video_path(seq_dir: str) -> Optional[str]:
     return None
 
 
+import os
+import re
+import base64
+from pathlib import Path
+from typing import Optional, List, Dict, Any, Tuple
+
+# Fallback definitions to ensure the code is ready-to-run
+try:
+    import openai as _openai_mod
+    HAS_OPENAI = True
+except ImportError:
+    HAS_OPENAI = False
+
+CAPTION_MAX_FRAMES = 8  # Adjust this default if needed
+
+
+import os
+import re
+import base64
+import torch
+from pathlib import Path
+from PIL import Image
+from typing import Optional, List, Dict, Any, Tuple
+
+# Fallback definitions to ensure the code is ready-to-run
+try:
+    import openai as _openai_mod
+    HAS_OPENAI = True
+except ImportError:
+    HAS_OPENAI = False
+
+CAPTION_MAX_FRAMES = 8  # Adjust this default if needed
+
+
 # ---------------------------------------------------------------------------
 # OpenAI Responses API client  (used only for caption + FPS generation)
 # ---------------------------------------------------------------------------
@@ -308,26 +342,36 @@ def _select_caption_frames(frames_dir: str, max_frames: int = CAPTION_MAX_FRAMES
     return [all_frames[round(i * step)] for i in range(max_frames)]
 
 
+from typing import List, Tuple, Optional
+import re
+import os
+
 def generate_caption_and_fps(
     frames_dir: str,
     objects: List[str],
     vlm_model: str = "openai",
     verbose: bool = False,
+    hint_str: str = "",
 ) -> Tuple[str, Optional[int]]:
     """
-    Send a sample of frames from `frames_dir` to the OpenAI Responses API and ask for:
+    Send a sample of frames from `frames_dir` to a VLM and ask for:
 
       (a) A temporal caption describing object interactions and motion across the frames.
-      (b) A recommended FPS integer (2–20) for Stage 2 TubeletGraph graph construction.
+      (b) A recommended FPS integer (2–10) for Stage 2 TubeletGraph graph construction.
 
-    Returns (caption, dynamic_fps).  On failure returns ("", None).
+    Supports:
+      - vlm_model == "openai"
+      - vlm_model == "qwen"  (Qwen/qwen3-VL-8B-Instruct)
+
+    Returns (caption, dynamic_fps). On failure returns ("", None).
     """
-    if vlm_model != "openai":
+
+    if vlm_model not in ("openai", "qwen"):
         if verbose:
-            print(f"  [Caption] Skipped — vlm_model='{vlm_model}' "
-                  f"(only 'openai' supported for caption+FPS generation).")
+            print(f"  [Caption] Skipped — vlm_model='{vlm_model}' (supported: 'openai', 'qwen').")
         return "", None
 
+    # Assuming `_select_caption_frames` and `CAPTION_MAX_FRAMES` are defined elsewhere in your file
     frame_paths = _select_caption_frames(frames_dir, max_frames=CAPTION_MAX_FRAMES)
     if not frame_paths:
         if verbose:
@@ -373,31 +417,103 @@ def generate_caption_and_fps(
         "</FPS>"
     )
 
+    if hint_str:
+        user_prompt += f"\n\nAdditional hint:\n{hint_str}"
+
+    raw_response = ""
+
     try:
-        client = _OpenAIResponsesClient()
-        if verbose:
-            print(f"  [Caption] Querying {client.model} with {len(frame_paths)} "
-                  f"frame(s) for caption + FPS …")
-        raw_response = client.query(
-            prompt=user_prompt,
-            image_paths=frame_paths,
-            system_prompt=system_prompt,
-            temperature=0.0,
-            max_tokens=1024,
-        )
+        if vlm_model == "openai":
+            # Assuming `_OpenAIResponsesClient` is defined elsewhere in your file
+            client = _OpenAIResponsesClient()
+            if verbose:
+                print(f"  [Caption] Querying {client.model} with {len(frame_paths)} frame(s) for caption + FPS …")
+            raw_response = client.query(
+                prompt=user_prompt,
+                image_paths=frame_paths,
+                system_prompt=system_prompt,
+                temperature=0.0,
+                max_tokens=1024,
+            )
+            
+        elif vlm_model == "qwen":
+            if verbose:
+                print(f"  [Caption] Querying Qwen via Singleton Manager with {len(frame_paths)} frame(s) for caption + FPS …")
+            
+            import torch
+            from qwen_manager import QwenSingleton
+
+            # 1. Get the globally shared model and processor
+            model, processor = QwenSingleton.get_model_and_processor()
+
+            # 2. Build the messages payload
+            messages = []
+            if system_prompt:
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": [{"type": "text", "text": system_prompt}],
+                    }
+                )
+
+            user_content = []
+            for p in frame_paths:
+                abs_path = os.path.abspath(p)
+                user_content.append({"type": "image", "url": abs_path})
+
+            user_content.append({"type": "text", "text": user_prompt})
+            messages.append({"role": "user", "content": user_content})
+
+            # 3. Process inputs
+            inputs = processor.apply_chat_template(
+                messages,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_dict=True,
+                return_tensors="pt",
+            )
+
+            # Move tensors to the model's device
+            device = model.device
+            inputs = {
+                k: v.to(device) if hasattr(v, "to") else v
+                for k, v in inputs.items()
+            }
+
+            # 4. Generate the response
+            with torch.inference_mode():
+                generated_ids = model.generate(
+                    **inputs, 
+                    max_new_tokens=1024,
+                    temperature=0.0, 
+                    do_sample=False
+                )
+
+            # 5. Trim input prompt tokens and decode
+            generated_ids_trimmed = [
+                out_ids[len(in_ids):]
+                for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)
+            ]
+
+            raw_response = processor.batch_decode(
+                generated_ids_trimmed,
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=False,
+            )[0]
+
     except Exception as e:
         if verbose:
-            print(f"  [Caption] OpenAI call failed: {e}")
+            print(f"  [Caption] {vlm_model.upper()} call failed: {e}")
         return "", None
 
     # ── Parse <CAPTION> ────────────────────────────────────────────────────
     caption_match = re.search(r"<CAPTION>(.*?)</CAPTION>", raw_response, re.DOTALL)
-    caption       = caption_match.group(1).strip() if caption_match else ""
+    caption = caption_match.group(1).strip() if caption_match else ""
 
-    # ── Parse <FPS> and clamp to [2, 20] ──────────────────────────────────
+    # ── Parse <FPS> and clamp to [2, 10] ──────────────────────────────────
     fps_match = re.search(r"<FPS>\s*(\d+)\s*</FPS>", raw_response)
     if fps_match:
-        fps_raw     = int(fps_match.group(1))
+        fps_raw = int(fps_match.group(1))
         dynamic_fps: Optional[int] = max(2, min(10, fps_raw))
     else:
         dynamic_fps = None
@@ -410,8 +526,7 @@ def generate_caption_and_fps(
             print(f"  [Caption] '{preview}{'…' if len(caption) > 140 else ''}'")
         else:
             print("  [Caption] WARNING: <CAPTION> tag missing in VLM response.")
-            if verbose:
-                print(f"  [Caption] Raw response (first 400 chars):\n{raw_response[:400]}")
+            print(f"  [Caption] Raw response (first 400 chars):\n{raw_response[:400]}")
 
     return caption, dynamic_fps
 
@@ -1163,3 +1278,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    

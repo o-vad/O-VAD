@@ -76,6 +76,8 @@ from typing import List, Tuple, Optional, Dict, Union
 import warnings
 warnings.filterwarnings('ignore')
 
+from qwen_manager import QwenSingleton
+
 
 # ==============================================================================
 # Input Processing (Video, Image, Folder)
@@ -365,6 +367,11 @@ def get_image_media_type(image_path: str) -> str:
     }.get(ext, "image/jpeg")
 
 
+import os
+import re
+import json
+from typing import List
+
 # ==============================================================================
 # VLM Object Detection
 # ==============================================================================
@@ -414,6 +421,17 @@ Be specific and descriptive. List each distinct object separately."""
                     "  ollama serve\n"
                     "  ollama pull llava"
                 )
+        elif self.vlm_type == "qwen":
+            # Qwen dependencies will be handled by the singleton manager
+            try:
+                import torch
+                from transformers import AutoProcessor
+            except ImportError:
+                raise ValueError(
+                    "Qwen requires torch and transformers. Please install them."
+                )
+        else:
+            raise ValueError(f"Unknown VLM type: {self.vlm_type}")
     
     def detect_objects(self, image_path: str) -> List[str]:
         """Detect objects in image using VLM."""
@@ -425,9 +443,67 @@ Be specific and descriptive. List each distinct object separately."""
             return self._detect_with_openai(image_path)
         elif self.vlm_type == "ollama":
             return self._detect_with_ollama(image_path)
+        elif self.vlm_type == "qwen":
+            return self._detect_with_qwen(image_path)
         else:
             raise ValueError(f"Unknown VLM type: {self.vlm_type}")
     
+    def _detect_with_qwen(self, image_path: str) -> List[str]:
+        """Use local Qwen VLM via Singleton Manager for object detection."""
+        import torch
+        from qwen_manager import QwenSingleton
+
+        # 1. Fetch the globally shared model and processor
+        model, processor = QwenSingleton.get_model_and_processor()
+
+        # 2. Prepare the messages using the absolute image path
+        abs_image_path = os.path.abspath(image_path)
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "url": abs_image_path},
+                    {"type": "text", "text": self.DETECTION_PROMPT}
+                ]
+            }
+        ]
+
+        # 3. Apply chat template
+        inputs = processor.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt"
+        )
+
+        # 4. Move tensors to the model's device
+        device = model.device
+        inputs = {k: v.to(device) if hasattr(v, "to") else v for k, v in inputs.items()}
+
+        # 5. Generate output
+        with torch.inference_mode():
+            outputs = model.generate(
+                **inputs, 
+                max_new_tokens=1024,
+                temperature=0.0,
+                do_sample=False
+            )
+
+        # 6. Parse and slice the prompt tokens out
+        generated_ids_trimmed = [
+            out_ids[len(in_ids):]
+            for in_ids, out_ids in zip(inputs["input_ids"], outputs)
+        ]
+        
+        response_text = processor.batch_decode(
+            generated_ids_trimmed, 
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False
+        )[0]
+
+        return self._parse_object_list(response_text)
+
     def _detect_with_claude(self, image_path: str) -> List[str]:
         """Use Claude for object detection."""
         import anthropic
@@ -1061,7 +1137,7 @@ Examples:
     parser.add_argument("--output_dir", "-o", default=None,
                        help="Output directory (creates TubeletGraph structure)")
     parser.add_argument("--vlm", "-v", default="claude",
-                       choices=["claude", "openai", "ollama"],
+                       choices=["claude", "openai", "ollama", "qwen"],
                        help="Vision-Language Model to use")
     parser.add_argument("--auto", "-a", action="store_true",
                        help="Automatically segment all detected objects")
@@ -1112,8 +1188,6 @@ Examples:
         print(f"\n✓ Detected {len(objects)} objects:")
 
         # store detected object list
-        
-
         for i, obj in enumerate(objects, 1):
             print(f"  {i}. {obj}")
         
@@ -1222,3 +1296,4 @@ Examples:
 
 if __name__ == "__main__":
     main()
+    

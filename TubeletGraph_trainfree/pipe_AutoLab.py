@@ -211,6 +211,24 @@ def _build_vqa_lookup(vqa_metadata: Dict, dataset_root: Optional[str]) -> Dict:
     return vqa_metadata
 
 
+import os
+import re
+import base64
+import torch
+from pathlib import Path
+from PIL import Image
+from typing import Optional, List, Dict, Any, Tuple
+
+# Fallback definitions to ensure the code is ready-to-run
+try:
+    import openai as _openai_mod
+    HAS_OPENAI = True
+except ImportError:
+    HAS_OPENAI = False
+
+CAPTION_MAX_FRAMES = 8  # Adjust this default if needed
+
+
 # ---------------------------------------------------------------------------
 # OpenAI Responses API client
 # ---------------------------------------------------------------------------
@@ -288,11 +306,15 @@ def generate_caption_and_fps(
     objects: List[str],
     vlm_model: str = "openai",
     verbose: bool = False,
+    hint_str: str = "",
 ) -> Tuple[str, Optional[int]]:
     """
     Send sampled frames to the OpenAI Responses API and ask for:
       (a) A temporal caption describing object interactions and motion.
       (b) A recommended FPS integer (2–10) for Stage 2 TubeletGraph.
+
+    When hint_str is non-empty the secret-mission prompt variant is used,
+    steering the VLM toward caption content consistent with the known anomaly.
 
     Returns (caption, dynamic_fps).  On any failure returns ("", None).
     """
@@ -1058,12 +1080,10 @@ def _discover_videos(
                 continue
 
             org_split = entry.get("org_split", entry.get("split", "")).lower()
-            in_path   = split.lower() in [part.lower() for part in candidate.parts]
-            if org_split != split.lower() and not in_path:
+            if org_split != split.lower():
                 continue
         else:
-            if split and split.lower() not in [part.lower() for part in candidate.parts]:
-                continue
+            continue
 
         video_files.append(candidate)
         seen.add(abs_str)
@@ -1209,3 +1229,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    

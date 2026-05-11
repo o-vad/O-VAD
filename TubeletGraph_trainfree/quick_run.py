@@ -53,7 +53,8 @@ def get_parser():
     parser.add_argument("--input_mask", required=True)
     parser.add_argument("--fps", type=int, default=None)
     parser.add_argument("--method", default="Ours")
-    
+    parser.add_argument("--vlm_model", default="openai")
+
     # NEW ARGUMENT
     parser.add_argument("--mask_frame_id", type=int, default=0, help="Frame ID for the mask input.")
     parser.add_argument("--hint_str", type=str, default="", help="Optional hint string to provide to the VLM for better predictions.")

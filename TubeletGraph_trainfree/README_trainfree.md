@@ -131,6 +131,20 @@ Inside pipe_xxx.py files, search and modify these lines for output storing:
 STAGE1_ROOT, STAGE2_ROOT, STAGE3_ROOT
 ```
 
+### Model Family
+
+Inside configs folder, you can modify in default.yaml 
+```yaml
+vlm:
+  model_name: Qwen/Qwen3-VL-32B-Instruct      # gpt-4.1
+```
+to qwen or gpt.
+Besides, modify the qwen_manager.py file to align to your chosen model if qwen family is used.
+```python
+class QwenSingleton:
+    _model_id = "<YOUR_MODEL_HERE>"
+```
+
 ## Execution
 
 To do inference with O-VAD, run command below for different datasets

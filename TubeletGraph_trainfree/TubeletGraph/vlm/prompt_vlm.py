@@ -33,6 +33,160 @@ from TubeletGraph.vlm.html_writer import HTMLWriter
 
 
 # =============================================================================
+# Qwen3-VL Local Model Support
+# =============================================================================
+
+# Global holders for the lazily-loaded Qwen model/processor so they are only
+# instantiated once across the whole run.
+_qwen_model = None
+_qwen_processor = None
+
+
+def _load_qwen_model(model_id: str, hf_token: str | None = None):
+    import torch
+    from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
+    from qwen_manager import QwenSingleton
+
+    global _qwen_model, _qwen_processor
+    if _qwen_model is not None:
+        return _qwen_model, _qwen_processor
+
+    _qwen_model, _qwen_processor = QwenSingleton.get_model_and_processor()
+    _qwen_model.eval()
+    print("Qwen model loaded.")
+    return _qwen_model, _qwen_processor
+
+
+def _call_qwen_local(
+    model_id: str,
+    hf_token: str | None,
+    system_prompt: str,
+    content_data: list,          # list of (data_type, value) tuples
+    temperature: float = 0.0,
+    max_new_tokens: int = 512,
+) -> str:
+    """Run a single inference call on the local Qwen3-VL model.
+
+    Args:
+        content_data: list of ('text', str) or ('image', np.ndarray) tuples,
+                      exactly as produced by get_user_content helpers.
+    Returns:
+        The model's response string.
+    """
+    import torch
+    from qwen_vl_utils import process_vision_info  # ships with Qwen3-VL
+
+    model, processor = _load_qwen_model(model_id, hf_token)
+
+    # Build the message list expected by the Qwen chat template
+    user_parts = []
+    for data_type, value in content_data:
+        if data_type == "text":
+            user_parts.append({"type": "text", "text": value})
+        elif data_type == "image":
+            # value is a numpy ndarray (HxWxC, uint8 or float)
+            img_np = value
+            if img_np.max() <= 1.0:
+                img_np = (img_np * 255).astype(np.uint8)
+            pil_img = Image.fromarray(img_np.astype(np.uint8))
+            buf = io.BytesIO()
+            pil_img.save(buf, format="PNG")
+            buf.seek(0)
+            b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            user_parts.append({
+                "type": "image",
+                "image": f"data:image/png;base64,{b64}",
+            })
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user",   "content": user_parts},
+    ]
+
+    text_input = processor.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+    image_inputs, video_inputs = process_vision_info(messages)
+
+    inputs = processor(
+        text=[text_input],
+        images=image_inputs,
+        videos=video_inputs,
+        padding=True,
+        return_tensors="pt",
+    )
+
+    device = next(model.parameters()).device
+    inputs = inputs.to(device)
+
+    do_sample = temperature > 0.0
+    generate_kwargs = dict(
+        max_new_tokens=max_new_tokens,
+        do_sample=do_sample,
+    )
+    if do_sample:
+        generate_kwargs["temperature"] = temperature
+
+    with torch.no_grad():
+        generated_ids = model.generate(**inputs, **generate_kwargs)
+
+    # Trim the prompt tokens from the output
+    trimmed = [
+        out_ids[len(in_ids):]
+        for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+    ]
+    response = processor.batch_decode(
+        trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+    )[0]
+    return response
+
+
+# =============================================================================
+# Unified VLM call wrapper
+# =============================================================================
+
+def call_vlm(
+    client,               # openai.OpenAI client OR None when using Qwen local
+    model_name: str,
+    system_prompt: str,
+    content_data: list,   # list of (data_type, value) as built by get_user_content helpers
+    temperature: float = 0.0,
+    html_writer=None,
+    # Qwen-specific (used only when model_name starts with 'Qwen')
+    qwen_model_id: str = "",
+    hf_token: str | None = None,
+) -> str:
+    """Dispatch a VLM call to either the local Qwen model or the OpenAI API.
+
+    The *content_data* argument is the raw list of ('text'|'image', value) tuples
+    that would normally be passed to get_user_content().  This wrapper handles
+    building the API payload internally so callers don't need to change.
+    """
+    if model_name.startswith("Qwen"):
+        rsp = _call_qwen_local(
+            model_id=qwen_model_id or model_name,
+            hf_token=hf_token,
+            system_prompt=system_prompt,
+            content_data=content_data,
+            temperature=temperature,
+        )
+        if html_writer is not None:
+            html_writer.add_heading("Response", level=3)
+            html_writer.add_text(rsp)
+        return rsp
+    else:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": get_user_content(content_data, html_writer=html_writer)},
+            ],
+            temperature=temperature,
+        )
+        return get_model_response(response, html_writer=html_writer)
+
+
+# =============================================================================
 # Image Encoding Utilities
 # =============================================================================
 
@@ -411,7 +565,10 @@ def detect_state_changes(
     prompts: dict,
     html_writer=None,
     temperature: float = 0.0,
-    sample_interval: int = 10
+    sample_interval: int = 10,
+    # Qwen-specific
+    qwen_model_id: str = "",
+    hf_token: str | None = None,
 ) -> list:
     """
     Detect state changes in a tracked object across video frames.
@@ -457,22 +614,23 @@ def detect_state_changes(
         img_after_masked = get_masked_image(img_after, mask_after, init_color)
         
         # Query VLM for state change
-        content = [
+        content_data = [
             prompts['state_change'][0],
             ('image', img_before_masked),
             ('image', img_after_masked),
         ]
         
         try:
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": get_system_prompt()},
-                    {"role": "user", "content": get_user_content(content, html_writer=html_writer)}
-                ],
+            rsp = call_vlm(
+                client=client,
+                model_name=model_name,
+                system_prompt=get_system_prompt(),
+                content_data=content_data,
                 temperature=temperature,
+                html_writer=html_writer,
+                qwen_model_id=qwen_model_id,
+                hf_token=hf_token,
             )
-            rsp = get_model_response(response, html_writer=html_writer)
             
             # Parse response
             state_changed = False
@@ -521,7 +679,10 @@ def analyze_object_interaction(
     query_c_name: str,
     prompts: dict,
     html_writer=None,
-    temperature: float = 0.0
+    temperature: float = 0.0,
+    # Qwen-specific
+    qwen_model_id: str = "",
+    hf_token: str | None = None,
 ) -> dict:
     """
     Analyze interaction between two objects in a frame.
@@ -530,21 +691,22 @@ def analyze_object_interaction(
     img_masked = get_masked_image(frame, obj_mask, init_color)
     img_masked = get_masked_image(img_masked, interactor_mask, query_color)
     
-    content = [
+    content_data = [
         prompts['interaction'][0],
         ('image', img_masked),
     ]
     
     try:
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": get_system_prompt()},
-                {"role": "user", "content": get_user_content(content, html_writer=html_writer)}
-            ],
+        rsp = call_vlm(
+            client=client,
+            model_name=model_name,
+            system_prompt=get_system_prompt(),
+            content_data=content_data,
             temperature=temperature,
+            html_writer=html_writer,
+            qwen_model_id=qwen_model_id,
+            hf_token=hf_token,
         )
-        rsp = get_model_response(response, html_writer=html_writer)
         
         # Parse response
         result = {
@@ -584,10 +746,13 @@ def get_parser():
     parser.add_argument('--temp', type=float, default=0.0, help='Temperature for sampling')
     parser.add_argument('--sample_interval', type=int, default=10, help='Frame interval for state change detection')
     parser.add_argument('--skip_state_change', action='store_true', help='Skip state change detection')
-    
+
     # NEW ARGUMENT
     parser.add_argument('--mask_frame_id', type=int, default=0, help='Frame ID for the mask input.')
     parser.add_argument('--hint_str', type=str, default="", help='Optional hint string to provide to the VLM for better predictions.')
+
+    # Qwen local model arguments
+    parser.add_argument('--hf_token', type=str, default=None, help='HuggingFace token for downloading Qwen model weights.')
     return parser
 
 
@@ -598,13 +763,21 @@ if __name__ == "__main__":
     pred_track_dir = osp.join(cfg.paths.outdir, args.pred)
 
     model_name = cfg.vlm.model_name
+
+    # -------------------------------------------------------------------------
+    # Client / model initialisation
+    # -------------------------------------------------------------------------
     if model_name.startswith('Qwen'):
-        client = openai.OpenAI(
-            base_url="https://router.huggingface.co/v1",
-            api_key=os.environ.get("HF_API_KEY")
-        )
+        # Local inference – no HTTP client needed.
+        # Pre-load the model once here so every subsequent call_vlm() is fast.
+        client = None
+        qwen_model_id = model_name   # e.g. "Qwen/Qwen3-VL-8B-Instruct"
+        hf_token = args.hf_token or os.environ.get("HF_TOKEN")
+        _load_qwen_model(qwen_model_id, hf_token)
     else:
         client = openai.OpenAI()
+        qwen_model_id = ""
+        hf_token = None
 
     init_color = np.array(cfg.vlm.init_color_rgb, dtype=float)
     init_c_name = cfg.vlm.init_color_name
@@ -662,18 +835,19 @@ if __name__ == "__main__":
         if init_mask:
             init_img_mask = get_masked_image(init_img, init_mask, init_color)
             
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": get_user_content([
-                        prompts['identify'][0],
-                        ('image', init_img_mask),
-                    ], html_writer=html_writer)}
+            rsp = call_vlm(
+                client=client,
+                model_name=model_name,
+                system_prompt=system_prompt,
+                content_data=[
+                    prompts['identify'][0],
+                    ('image', init_img_mask),
                 ],
                 temperature=args.temp,
+                html_writer=html_writer,
+                qwen_model_id=qwen_model_id,
+                hf_token=hf_token,
             )
-            rsp = get_model_response(response, html_writer=html_writer)
             
             # Parse object info
             obj_desc = rsp
@@ -706,7 +880,9 @@ if __name__ == "__main__":
                 prompt_obj_idx,
                 init_color, init_c_name,
                 prompts, html_writer,
-                args.temp, args.sample_interval
+                args.temp, args.sample_interval,
+                qwen_model_id=qwen_model_id,
+                hf_token=hf_token,
             )
             
             if state_changes:
@@ -743,40 +919,42 @@ if __name__ == "__main__":
                     late_img_mask_ = get_masked_image(late_img, init_mask_union, init_color)
                     late_img_mask = get_masked_image(late_img_mask_, new_track_mask, query_color)
 
-                    response = client.chat.completions.create(
-                        model=model_name,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": get_user_content([
-                                prompts['frame_check'][0],
-                                ('image', late_img_mask),
-                            ], html_writer=html_writer)}
-                        ]
+                    rsp = call_vlm(
+                        client=client,
+                        model_name=model_name,
+                        system_prompt=system_prompt,
+                        content_data=[
+                            prompts['frame_check'][0],
+                            ('image', late_img_mask),
+                        ],
+                        html_writer=html_writer,
+                        qwen_model_id=qwen_model_id,
+                        hf_token=hf_token,
                     )
-                    rsp = get_model_response(response, html_writer=html_writer)
                     if yes_no_cleanup(rsp) == 'yes':
                         break
 
                 # Get action and object description
-                contents = [
+                content_data = [
                     prompts['action'][0],
                     ('image', init_img_mask),
                     ('image', late_img_mask),
                 ]
                 for prev_frame_idx, prev_response in memory_responses:
                     t = (obj_start_frame - prev_frame_idx) // data_cfg.fps
-                    contents.append(('text', f"Previous response at frame {t} seconds ago:"))
-                    contents.append(('text', prev_response))
+                    content_data.append(('text', f"Previous response at frame {t} seconds ago:"))
+                    content_data.append(('text', prev_response))
 
-                response = client.chat.completions.create(
-                    model=model_name,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": get_user_content(contents, html_writer=html_writer)}
-                    ],
+                rsp = call_vlm(
+                    client=client,
+                    model_name=model_name,
+                    system_prompt=system_prompt,
+                    content_data=content_data,
                     temperature=args.temp,
+                    html_writer=html_writer,
+                    qwen_model_id=qwen_model_id,
+                    hf_token=hf_token,
                 )
-                rsp = get_model_response(response, html_writer=html_writer)
                 memory_responses.append((obj_start_frame, rsp))
                 
                 try:
@@ -835,7 +1013,9 @@ if __name__ == "__main__":
                     frame_data[other_obj],
                     init_color, query_color,
                     init_c_name, query_c_name,
-                    prompts, html_writer, args.temp
+                    prompts, html_writer, args.temp,
+                    qwen_model_id=qwen_model_id,
+                    hf_token=hf_token,
                 )
                 
                 obj_info[prompt_obj_idx]['interaction'] = interaction_result
