@@ -1,2 +1,0 @@
-python TubeletGraph/vlm/prompt_vad.py -c configs/default.yaml -p custom-0000-Ours_gpt-4.1 \
---video_path /home/yizhou/Mprojects/VAD/TubeletGraph/assets/example/PhysAD/0000.mp4 --detect_anomalies --sample_interval 10
