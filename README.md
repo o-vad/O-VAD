@@ -1,6 +1,6 @@
 # O-VAD: Industrial Video Anomaly Detection through Object-Centric Tracking and Reasoning
 
-### [Project Page](https://o-vad.github.io/) | [Paper](https://arxiv.org/abs/2607.18142) | [Code](https://github.com/o-vad/O_VAD)
+### [Project Page](https://o-vad.github.io/) | [Paper](https://arxiv.org/abs/2607.18142) | [Code](https://github.com/o-vad/O-VAD)
 
 Official implementation of the ECCV 2026 paper *"O-VAD: Industrial Video Anomaly Detection through Object-Centric Tracking and Reasoning"*.
 
@@ -50,8 +50,8 @@ Tested with `python=3.10`, `torch==2.7.0+cu126`, `torchvision==0.22.0+cu126` on 
 ### 2.1 Environment and core dependencies
 
 ```bash
-git clone --recurse-submodules https://github.com/o-vad/O_VAD.git
-cd O_VAD
+git clone --recurse-submodules https://github.com/o-vad/O-VAD.git
+cd O-VAD
 
 conda create -n ovad python=3.10 -y
 conda activate ovad
