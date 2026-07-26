@@ -50,6 +50,22 @@ Samples whose report already exists are skipped, so an interrupted run resumes
 where it stopped.  To spread a run across jobs or GPUs, give each job a disjoint
 --sample_id_s / --sample_id_e range over the same storage roots.
 
+Parameter settings used for the reported results
+------------------------------------------------
+  --fps 3               Fallback FPS for Stage 2. The Stage 1 caption call
+                        recommends an FPS in [2, 10] and that takes precedence;
+                        this value is used only when that call is unavailable.
+  --sample_interval     Frame stride for state-change detection:
+                          60  Phys-AD and AutoLab
+                          25  IPAD
+                        Lower means more comparisons per clip: finer temporal
+                        resolution, proportionally more VLM calls.
+  --split test          Matched against 'org_split' in the VQA file.
+  --method Ours         Method key from the config. Ours_abl_prox / _sem /
+                        _both disable the proximity and semantic constraints.
+
+Run `python pipeline.py --help` for the full flag reference.
+
 Usage:
     python pipeline.py analyze <ROOT> --dataset <NAME> -c <CONFIG> [options]
 

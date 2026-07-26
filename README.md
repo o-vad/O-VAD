@@ -161,15 +161,21 @@ Expected layout: `IPAD/IPAD_dataset/<subject>/<split>/frames/<seq>`, e.g. `IPAD/
 
 ### 3.3 AutoLab / LiquidAD (8 pipette types)
 
-Download the latest release, which carries pipette-level labels alongside the VQA data.
+**Not publicly available.** For access, contact the corresponding author of
+*"Deep video anomaly detection in automated laboratory setting"*.
 
-Expected layout: `AutoLab/<split>/<subset>/`, e.g. `AutoLab/test/abnormal_1/`.
-
-> If any archive extracts into an unexpected nesting, move the directories so they match the layouts above — the pipeline resolves samples by walking these paths.
+Expected layout once obtained: `AutoLab/<split>/<subset>/`, e.g. `AutoLab/test/abnormal_1/`.
 
 ### 3.4 VQA files
 
-Each dataset ships a `*_VQA.jsonl` (one JSON object per line). These files drive video discovery, split filtering, and evaluation:
+Each dataset needs a VQA JSONL (one JSON object per line) that supplies ground truth and drives sample discovery. Two are shipped:
+
+```
+dataset/PhysAD_VQA.jsonl     6426 entries
+dataset/IPAD_VQA.jsonl       1068 entries
+```
+
+AutoLab's is not included, since the dataset itself is not public ([§3.3](#33-autolab--liquidad-8-pipette-types)).
 
 ```json
 {"video_path": "/abs/path/Phys-AD/ball/test/insufficient_gas/0008.mp4",
@@ -180,10 +186,10 @@ Each dataset ships a `*_VQA.jsonl` (one JSON object per line). These files drive
 
 | Field | Meaning |
 |:--|:--|
-| `video_path` | Absolute path to the video / frame directory. **Must be rewritten to your local paths** (see [§4.1](#41-rewrite-data-paths-in-the-vqa-files)). |
-| `org_split` | Split tag matched against `--split` (default `test`). |
+| `video_path` | Absolute path to the video / frame directory. **Must be rewritten to your local paths** — see [§4.1](#41-point-the-vqa-files-at-your-data). |
+| `org_split` | Split tag matched against `--split`. |
 | `answer` | `"Normal"` or `"Abnormal"` — video-level ground truth. |
-| `context` | Per dataset: Phys-AD → anomaly-type string (or `"normal"`); IPAD → per-frame 0/1 list; AutoLab → `[start_frame, end_frame]` closed interval. |
+| `context` | Phys-AD → anomaly-type string (or `"normal"`); IPAD → per-frame 0/1 list; AutoLab → `[start_frame, end_frame]`. |
 
 ---
 
@@ -191,13 +197,18 @@ Each dataset ships a `*_VQA.jsonl` (one JSON object per line). These files drive
 
 Four things must be adapted before the first run. Steps 4.1 and 4.2 are **mandatory** — the shipped values point at the authors' cluster.
 
-### 4.1 Rewrite data paths in the VQA files
+### 4.1 Point the VQA files at your data
 
-Every `video_path` in the VQA JSONL must resolve on your machine:
+The shipped JSONL files use a placeholder prefix, `dataset/`. Rewrite it to wherever your videos actually live:
 
 ```bash
-sed -i 's#/work/nvme/bgiv/username/datasets#/your/data/root#g' PhysAD_VQA.jsonl
+sed -i 's#"video_path": "dataset/#"video_path": "/your/data/root/#g' \
+    dataset/PhysAD_VQA.jsonl dataset/IPAD_VQA.jsonl
 ```
+
+Afterwards each `video_path` must resolve to a file (Phys-AD) or a frame directory (IPAD) on your machine — sample discovery drops anything it cannot find, and a wrong prefix silently yields "No samples found".
+
+The `Phys-AD/` and `IPAD/IPAD_dataset/` components must stay in the path: storage layout under `STAGE1/2/3_ROOT` is anchored on them.
 
 ### 4.2 Set the output roots in the pipeline
 
@@ -217,78 +228,44 @@ grep -n "STAGE._ROOT = Path" pipeline.py
 
 ### 4.3 VLM backbone
 
-O-VAD uses **one VLM for all three stages** — grounding, state tracking and reasoning. Whichever backbone you pick, every stage uses that same model and endpoint; a mixed run is not reachable through `pipeline.py`.
+O-VAD uses **one VLM for all three stages**. `--vlm` selects it and is authoritative — a mixed run is not reachable through `pipeline.py`.
 
-| Backbone | `--vlm` | Talks to | Needs |
-|:--|:--|:--|:--|
-| **OpenAI API** | `openai` | `api.openai.com`, using `vlm.openai_model` (default `gpt-5.2`). Used for all reported results. | `OPENAI_API_KEY` |
-| **Qwen3-VL (local)** | `qwen` | An OpenAI-compatible server you run, e.g. vLLM | GPU(s) for the server |
+| `--vlm` | Talks to | Needs |
+|:--|:--|:--|
+| `openai` | `api.openai.com`, using `vlm.openai_model`. Used for all reported results. | `OPENAI_API_KEY` |
+| `qwen` | An OpenAI-compatible server you run, e.g. vLLM | GPU(s) for the server |
 
-Both speak the same OpenAI protocol, so the pipeline holds a single client and only the endpoint differs — no in-process model loading, and no `transformers` on the client side.
-
-Configure both backbones in [configs/default.yaml](configs/default.yaml) — one key each:
+Both speak the same OpenAI protocol, so only the endpoint differs — no in-process model loading, and no `transformers` on the client side. One config key per backbone:
 
 ```yaml
 vlm:
-  openai_model: gpt-5.2                 # used when --vlm openai
-  base_url: http://127.0.0.1:8000/v1    # used when --vlm qwen
+  openai_model: gpt-5.2                 # --vlm openai
+  base_url: http://127.0.0.1:8000/v1    # --vlm qwen
 ```
 
-`base_url` is read **only** by the qwen backbone, so leaving it set does not affect `--vlm openai`. For `--vlm qwen` the model name comes from the server's own `/v1/models`, so there is no second value to keep in sync.
+`base_url` is read only by the qwen backbone, so leaving it set does not affect `--vlm openai`. For qwen, the model name comes from the server's own `/v1/models` — nothing to keep in sync.
 
-#### Option A — OpenAI (default)
-
-```bash
-export OPENAI_API_KEY="sk-..."
-
-python pipeline.py analyze /data/Phys-AD/ball --dataset physad \
-    -c configs/default.yaml \
-    --vqa_file /data/vqa_data/PhysAD_VQA.jsonl \
-    --vlm openai --fps 3 --sample_interval 60 --split test
-```
-
-All three stages run on `gpt-5.2`. To use a different OpenAI model, change `vlm.openai_model` — that one key moves all three stages together.
-
-#### Option B — local Qwen3-VL via vLLM
-
-Install vLLM in a **separate environment** (it pins its own torch, which will fight the SAM2/CropFormer stack), then serve the model:
+**Using a local Qwen3-VL.** Install vLLM in a **separate environment** (it pins its own torch, which will fight the SAM2/CropFormer stack):
 
 ```bash
-# in a separate env / on a separate node
 pip install vllm
 vllm serve Qwen/Qwen3-VL-32B-Instruct --port 8000 \
     --limit-mm-per-prompt '{"image": 16}' --max-model-len 32768
 ```
 
-> `--limit-mm-per-prompt` is **required**: vLLM allows only one image per request by default, while Stage 1 sends up to 8 caption frames in one call and Stage 3's visual verification sends considerably more. Without it those requests fail.
+> `--limit-mm-per-prompt` is **required**: vLLM allows one image per request by default, while Stage 1 sends up to 8 caption frames in a single call.
 
-Then point the pipeline at it and select the backbone:
-
-```bash
-python pipeline.py analyze /data/Phys-AD/ball --dataset physad \
-    -c configs/default.yaml \
-    --vqa_file /data/vqa_data/PhysAD_VQA.jsonl \
-    --vlm qwen --fps 3 --sample_interval 60 --split test
-```
-
-`$OVAD_VLM_BASE_URL` overrides `vlm.base_url` if you would rather not edit the config:
-
-```bash
-export OVAD_VLM_BASE_URL=http://127.0.0.1:8000/v1
-python pipeline.py ... --vlm qwen
-```
-
-`pipeline.py` resolves the endpoint once and exports it to Stages 2 and 3, which run as separate processes — so they cannot drift onto a different model. It prints the resolved choice at startup:
+Then `--vlm qwen`. `$OVAD_VLM_BASE_URL` overrides the config. `pipeline.py` resolves the endpoint once and exports it to Stages 2 and 3, which run as separate processes, and prints what it resolved:
 
 ```
 [VLM] backbone=qwen  model=Qwen3-VL-30B-A3B-Instruct  endpoint=http://127.0.0.1:8000/v1  (all three stages)
 ```
 
-If `--vlm qwen` is passed with no server configured, the run stops immediately with instructions rather than failing per sample.
+If `--vlm qwen` is passed with no server configured, the run stops immediately rather than failing per sample.
 
-> **Reproducing the paper:** all reported numbers used the OpenAI backbone (`base_url` unused). The Qwen path is provided for local/offline inference and was not used for published results.
+> **Reproducing the paper:** all reported numbers used the OpenAI backbone. The Qwen path is for local/offline inference and was not used for published results.
 
-**Known limitation of the Qwen backbone.** `locate_group_bbox` (used only by `--dataset autolab`, to crop around the pipettes before segmenting) asks the VLM for a bounding box. Qwen3-VL returns coordinates in its own internally-resized image space rather than the requested normalized grid, so the box is rejected and Stage 1 falls back to segmenting the full frame. Detection and all other stages are unaffected; AutoLab on the Qwen backbone simply loses the crop optimisation.
+**Known limitation on the qwen backbone.** `locate_group_bbox` (used only by `--dataset autolab`) asks the VLM for a bounding box; Qwen3-VL returns coordinates in its own resized image space, so the box is rejected and Stage 1 segments the full frame instead. Other stages are unaffected.
 
 ### 4.4 Model checkpoints (optional)
 
@@ -304,16 +281,14 @@ One driver serves every benchmark:
 python pipeline.py analyze <ROOT> --dataset <NAME> -c <CONFIG> --vqa_file <JSONL> [options]
 ```
 
-`<ROOT>` is searched recursively; discovered samples are then filtered by `--split` and by membership in `--vqa_file`. Point it at the dataset root or at a single category to process a subset. Samples whose report already exists are skipped, so an interrupted run resumes where it stopped.
-
-### 5.1 Per-dataset commands
+`<ROOT>` is searched recursively; discovered samples are then filtered by `--split` and by membership in `--vqa_file`. Point it at the dataset root or at a single category to process a subset.
 
 **Phys-AD**
 
 ```bash
 python pipeline.py analyze /data/Phys-AD/ball --dataset physad \
     -c configs/default.yaml \
-    --vqa_file /data/vqa_data/PhysAD_VQA.jsonl \
+    --vqa_file dataset/PhysAD_VQA.jsonl \
     --vlm openai --fps 3 --sample_interval 60 \
     --split test
 ```
@@ -323,12 +298,12 @@ python pipeline.py analyze /data/Phys-AD/ball --dataset physad \
 ```bash
 python pipeline.py analyze /data/IPAD/IPAD_dataset/S04 --dataset ipad \
     -c configs/default.yaml \
-    --vqa_file /data/vqa_data/IPAD_VQA.jsonl \
+    --vqa_file dataset/IPAD_VQA.jsonl \
     --vlm openai --fps 3 --sample_interval 25 \
     --split test
 ```
 
-**AutoLab / LiquidAD**
+**AutoLab / LiquidAD** — dataset and its VQA file are not public ([§3.3](#33-autolab--liquidad-8-pipette-types)):
 
 ```bash
 python pipeline.py analyze /data/AutoLab/test/abnormal_1 --dataset autolab \
@@ -339,58 +314,14 @@ python pipeline.py analyze /data/AutoLab/test/abnormal_1 --dataset autolab \
     --split test
 ```
 
-### 5.2 CLI reference
-
-| Flag | Default | Notes |
-|:--|:--|:--|
-| `analyze <ROOT>` | — | Positional. Root directory searched recursively for samples. |
-| `--dataset` | *required* | `physad` \| `ipad` \| `autolab`. Selects the layout, discovery rule and grounding behaviour. |
-| `-c, --config` | *required* | Path to `configs/default.yaml`. |
-| `--vqa_file` | *required* | Ground-truth JSONL; also acts as the sample allow-list. |
-| `--split` | `test` | Matched against `org_split` in the VQA file (case-insensitive). |
-| `--vlm` | `openai` | Backbone for **all three stages**: `openai` \| `qwen`. Authoritative — nothing in the config needs to match it. See [§4.3](#43-vlm-backbone). |
-| `--fps` | `None` | **Fallback** FPS for Stage 2, used only when the VLM-recommended FPS is unavailable. `3` is the reported setting. |
-| `--sample_interval` | `10` | Frame stride for state-change detection. Reported: `60` (Phys-AD, AutoLab), `25` (IPAD). |
-| `--method` | `Ours` | Method key from `configs/default.yaml`; switch to `Ours_abl_*` for ablations. |
-| `--dataset_root` | inferred | **AutoLab only.** Resolves the relative `video_path` values in its VQA file. Defaults to the `AutoLab/` component of `<ROOT>`. |
-| `-o, --output` | `output` | Legacy flag — real outputs go to the `STAGE*_ROOT` paths from [§4.2](#42-set-the-output-roots-in-the-pipeline). |
-| `--no-auto` | off | Disables automatic object detection in Stage 1. |
-| `-v, --verbose` | off | Per-stage progress and the exact stage commands. |
-
-**Tuning flags** — the defaults reproduce the per-dataset behaviour of the original drivers, so you only need these when deviating:
-
-| Flag | Default | Notes |
-|:--|:--|:--|
-| `--runner` | `inprocess` for `physad`, `subprocess` otherwise | How Stages 2/3 are launched. `inprocess` keeps loaded models (Qwen weights, SAM3) shared across stages instead of re-importing per sample; `subprocess` isolates them so a stage crash cannot take down the run. |
-| `--mask-frame-mode` | `best` for `autolab`, `first` otherwise | Which frame the Stage 1 mask is anchored to. `first` always uses frame 0; `best` uses the highest-coverage scanned frame and forwards it to Stage 2 as `--mask_frame_id`. |
-| `--max-retries` | `100` | Attempts per stage before a sample is marked failed. Each failure sleeps 3 s, so a broken environment takes ~5 min per sample to give up — lower this while debugging. |
-| `--keep-scratch` | off | Retain `_custom_dataset/`, `_interm_out/`, `_pred_out/` for inspection instead of cleaning them per sample. |
-| `--sample_id_s` / `--sample_id_e` | `None` | Shard the discovered sample list — see [§5.3](#53-parallel-sharding). |
-
-### 5.3 Parallel sharding
-
-`--sample_id_s` / `--sample_id_e` slice the discovered sample list, so a run can be split across jobs or GPUs:
+Every flag is documented in the driver itself, along with the parameter
+settings used for the reported results:
 
 ```bash
-python pipeline.py analyze /data/Phys-AD/caster_wheel --dataset physad \
-    -c configs/default.yaml \
-    --vqa_file /data/vqa_data/PhysAD_VQA.jsonl \
-    --vlm openai --fps 3 --sample_interval 60 \
-    --split test \
-    --sample_id_s 0 --sample_id_e 10
+python pipeline.py --help
 ```
 
-Launch several jobs with disjoint `[--sample_id_s, --sample_id_e)` ranges pointing at the same `STAGE*_ROOT`; the outputs merge on disk. The slice is applied **after** VQA and split filtering, so equal-width ranges give equal-sized shards. Overlapping ranges are safe too — a sample whose report already exists is skipped.
-
-### 5.4 Cluster submission
-
-[run_pipe.slurm](run_pipe.slurm) is a SLURM template (A40 partition, 20 h, 1 GPU, 8 CPUs). Update the account, conda path and working directory before submitting:
-
-```bash
-sbatch run_pipe.slurm
-```
-
-> ⚠️ Export `OPENAI_API_KEY` from your shell profile or a secrets file. Never write a real key into the batch script — it ends up in git history.
+Samples whose report already exists are skipped, so an interrupted run resumes where it stopped. `--sample_id_s` / `--sample_id_e` slice the sample list to spread a run across jobs or GPUs.
 
 ---
 
@@ -404,7 +335,7 @@ $STAGE2_ROOT/PhysAD/ball/test/insufficient_gas/0008/                   # tubelet
 $STAGE3_ROOT/PhysAD/ball/test/insufficient_gas/0008_report.json        # anomaly report
 ```
 
-Nothing is written into the repository itself: local scratch dirs (`_custom_dataset/`, `_interm_out/`, `_pred_out/`) are created under the project root and cleaned per sample once the stage data is safely written (`--keep-scratch` retains them). Frames are staged in `$TMPDIR` and never copied to the storage roots.
+Local scratch (`_custom_dataset/`, `_interm_out/`, `_pred_out/`) is created under the project root and cleaned per sample; `--keep-scratch` retains it. Frames are staged in `$TMPDIR`.
 
 Each report is a structured JSON document:
 
@@ -432,7 +363,9 @@ Each report is a structured JSON document:
 }
 ```
 
-`*_report.json` is the only artefact Stage 3 writes; the formatted report is also printed to stdout (visible with `-v`). To confirm your install produces well-formed output, check that the first report contains a non-empty `anomalies[].reasoning_trace` with all six steps populated — an empty `anomalies` list with `"overall_severity": "N/A"` means Stage 3 produced no parseable report and the fallback stub was written instead.
+`*_report.json` is the only artefact Stage 3 writes; the formatted report also goes to stdout (`-v`).
+
+> **Sanity check:** a healthy report has all six `reasoning_trace` steps populated. An empty `anomalies` list with `"overall_severity": "N/A"` means Stage 3 produced nothing parseable and the fallback stub was written.
 
 ---
 
@@ -445,7 +378,7 @@ Each report is a structured JSON document:
 ```bash
 python eval/eval_general.py \
     --dataset physad \
-    --vqa  /data/vqa_data/PhysAD_VQA.jsonl \
+    --vqa  dataset/PhysAD_VQA.jsonl \
     --reports $STAGE3_ROOT/PhysAD
 ```
 
@@ -455,9 +388,9 @@ python eval/eval_general.py \
 | `ipad` | Video-level 5 metrics + frame-level Acc / P / R / F1 / AUROC |
 | `autolab` | Video-level 5 metrics + frame-level metrics (GT `[start, end]` span expanded per frame) |
 
-`--reports` is searched recursively for `*_report.json`. Reports are matched to VQA entries by normalising the video path into the report's `video_name` (e.g. `/…/IPAD_dataset/R01/testing/frames/02` → `R01_testing_frames_02`), so a report with an unexpected `video_name` will silently go unmatched — check the reported entry count.
+`--reports` is searched recursively for `*_report.json`. Reports match VQA entries by normalising the video path into `video_name` (`/…/IPAD_dataset/R01/testing/frames/02` → `R01_testing_frames_02`), so an unexpected `video_name` goes silently unmatched — check the reported entry count.
 
-Frame-level prediction marks a frame abnormal if it lies inside any predicted `[start_frame, end_frame]` interval; AUROC uses the continuous confidence score.
+A frame counts as abnormal if it falls inside any predicted `[start_frame, end_frame]`; AUROC uses the confidence score.
 
 ### 7.2 Description quality (Sentence-BERT)
 
@@ -466,21 +399,11 @@ Frame-level prediction marks a frame abnormal if it lies inside any predicted `[
 ```bash
 python eval/eval_bert.py \
     --outputs $STAGE3_ROOT/PhysAD \
-    --vqa /data/vqa_data/PhysAD_VQA.jsonl \
+    --vqa dataset/PhysAD_VQA.jsonl \
     --model sbert          # sbert = all-MiniLM-L6-v2 (default) | bert = bert-base-uncased CLS
 ```
 
 `--outputs` accepts either a directory of per-sample JSON files or a single JSON list.
-
-### 7.3 Reference results
-
-| Benchmark | Video AUROC |
-|:--|:--|
-| Phys-AD | 0.584 (1st/2nd place on 16 of 22 categories) |
-| LiquidAD / AutoLab | 0.692 |
-| IPAD | 0.565 (1st/2nd place on 12 of 16 scenes) |
-
-Because every stage queries a VLM, minor run-to-run variance is expected even at temperature 0.
 
 ---
 
@@ -511,7 +434,13 @@ python TubeletGraph/vlm/prompt_vad.py \
 
 To generate the mask automatically instead of drawing it, call the Stage 1 grounding module directly — [annotate/vlm_mask_grounded.py](annotate/vlm_mask_grounded.py) exposes `SAM3Segmenter`, which turns VLM-produced object phrases into masks.
 
-For a full custom **dataset**, write a VQA JSONL matching [§3.4](#34-vqa-files) and add a `DatasetAdapter` subclass to [pipeline.py](pipeline.py) — subclass it, set `kind` (`"video"` for `.mp4` samples or `"sequence"` for frame directories), implement `unique_stem` and `nvme_rel` for your layout, and register it in the `ADAPTERS` dict. Override `discover`, `grounding_objects` or `resolve_normal_reference` only if your layout needs them; the base class covers the common case. Alternatively, add a block under `datasets:` in `configs/default.yaml` (`data_dir`, `image_dir`, `anno_dir`, `split_dir`, `image_format`, `anno_format`, `fps`) and drive the tracking stage directly with `TubeletGraph/run.py`.
+For a full custom **dataset**, write a VQA JSONL matching [§3.4](#34-vqa-files) and add a `DatasetAdapter` subclass to [pipeline.py](pipeline.py):
+
+- set `kind` — `"video"` for `.mp4` samples, `"sequence"` for frame directories
+- implement `unique_stem` and `nvme_rel` for your layout
+- register it in the `ADAPTERS` dict
+
+Override `discover`, `grounding_objects` or `resolve_normal_reference` only if your layout needs them; the base class covers the common case.
 
 ---
 
@@ -540,7 +469,8 @@ Files on the O-VAD execution path are marked ★.
 │   ├── build_custom_dataset.py ★ called by quick_run.py
 │   ├── eval_general.py          detection metrics (video- and frame-level)
 │   └── eval_bert.py             Sentence-BERT description scoring
-├── configs/default.yaml     ★ models, thresholds, dataset paths, VLM choice
+├── configs/default.yaml     ★ models, thresholds, VLM backbone
+├── dataset/                   VQA ground-truth JSONL for Phys-AD and IPAD
 ├── thirdparty/              ★ sam2, sam3, Entity/CropFormer, fc-clip, setup_ckpts.sh
 └── run_pipe.slurm             SLURM template
 ```
